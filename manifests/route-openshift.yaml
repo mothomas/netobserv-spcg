@@ -1,0 +1,36 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: spcg
+  namespace: pcap-frontend
+  labels:
+    app: spcg-frontend
+spec:
+  to:
+    kind: Service
+    name: spcg-frontend
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: spcg-api
+  namespace: pcap-frontend
+  labels:
+    app: spcg-ui-portal
+spec:
+  path: /api
+  to:
+    kind: Service
+    name: spcg-ui-portal
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

@@ -1,0 +1,10 @@
+.git
+.github
+bin/
+frontend/node_modules/
+frontend/.next/
+**/.DS_Store
+.env
+*.pem
+*.key
+agent-transcripts/

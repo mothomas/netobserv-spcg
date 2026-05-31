@@ -1,0 +1,35 @@
+# Vanilla Kubernetes RBAC for pcap-capture (no OpenShift SCC).
+# Use this instead of rbac-capture.yaml on standard K8s clusters.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pcap-executor
+  namespace: pcap-capture
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spcg-pcap-executor
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy", "pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spcg-pcap-executor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spcg-pcap-executor
+subjects:
+  - kind: ServiceAccount
+    name: pcap-executor
+    namespace: pcap-capture

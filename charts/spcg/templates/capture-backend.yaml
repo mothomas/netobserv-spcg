@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-backend-engine
+  namespace: {{ .Values.namespaces.capture }}
+spec:
+  replicas: {{ .Values.capture.backend.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: spcg-backend-engine
+  template:
+    metadata:
+      labels:
+        app: spcg-backend-engine
+    spec:
+      serviceAccountName: pcap-executor
+      containers:
+        - name: backend-engine
+          image: {{ .Values.capture.backend.image }}
+          ports:
+            - containerPort: 8443
+          env:
+            - name: NETOBSERV_BIN
+              value: {{ .Values.capture.netobservBin }}
+            - name: SNIFFER_SERVICE_HOST
+              value: spcg-sniffer.{{ .Values.namespaces.capture }}.svc.cluster.local
+          securityContext:
+            privileged: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spcg-backend-engine
+  namespace: {{ .Values.namespaces.capture }}
+spec:
+  selector:
+    app: spcg-backend-engine
+  ports:
+    - port: 8443
+      targetPort: 8443

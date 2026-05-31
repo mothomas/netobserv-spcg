@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-ui-portal
+  namespace: pcap-frontend
+  labels:
+    app: spcg-ui-portal
+    spcg.io/tier: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spcg-ui-portal
+  template:
+    metadata:
+      labels:
+        app: spcg-ui-portal
+        spcg.io/tier: frontend
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ui-portal
+          image: spcg-ui-portal:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: UI_LISTEN
+              value: ":8080"
+            - name: ENGINE_GRPC_ADDR
+              value: "spcg-backend-engine.pcap-capture.svc.cluster.local:8443"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spcg-ui-portal
+  namespace: pcap-frontend
+spec:
+  selector:
+    app: spcg-ui-portal
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-frontend
+  namespace: pcap-frontend
+  labels:
+    app: spcg-frontend
+    spcg.io/tier: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spcg-frontend
+  template:
+    metadata:
+      labels:
+        app: spcg-frontend
+        spcg.io/tier: frontend
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: spcg-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NODE_ENV
+              value: production
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: next-cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spcg-frontend
+  namespace: pcap-frontend
+spec:
+  selector:
+    app: spcg-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000

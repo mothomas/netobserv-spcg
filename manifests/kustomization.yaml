@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace-capture.yaml
+  - namespace-frontend.yaml
+  - rbac-capture.yaml
+  - network-policies.yaml
+  - deployment-capture.yaml
+  - deployment-frontend.yaml
+  - route-openshift.yaml

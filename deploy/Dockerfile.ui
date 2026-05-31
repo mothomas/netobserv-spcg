@@ -1,0 +1,12 @@
+FROM golang:1.22-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -buildvcs=false -o /ui-portal ./cmd/ui-portal
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+COPY --from=build /ui-portal /usr/local/bin/ui-portal
+USER 1001
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/ui-portal"]

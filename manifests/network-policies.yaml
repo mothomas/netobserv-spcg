@@ -1,0 +1,152 @@
+# --- pcap-capture: default deny, selective ingress ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: pcap-capture
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend-engine
+  namespace: pcap-capture
+spec:
+  podSelector:
+    matchLabels:
+      app: spcg-backend-engine
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pcap-frontend
+          podSelector:
+            matchLabels:
+              app: spcg-ui-portal
+      ports:
+        - protocol: TCP
+          port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-to-sniffer
+  namespace: pcap-capture
+spec:
+  podSelector:
+    matchLabels:
+      app: spcg-sniffer
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: spcg-backend-engine
+      ports:
+        - protocol: TCP
+          port: 2055
+---
+# --- pcap-frontend: egress only to capture tier ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: pcap-frontend
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: pcap-frontend
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - protocol: UDP
+          port: 5353
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ui-portal-to-capture-engine
+  namespace: pcap-frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: spcg-ui-portal
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pcap-capture
+          podSelector:
+            matchLabels:
+              app: spcg-backend-engine
+      ports:
+        - protocol: TCP
+          port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-ui-portal
+  namespace: pcap-frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: spcg-frontend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: spcg-ui-portal
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-frontend-services
+  namespace: pcap-frontend
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: ["spcg-frontend", "spcg-ui-portal"]
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 3000
+        - protocol: TCP
+          port: 8080

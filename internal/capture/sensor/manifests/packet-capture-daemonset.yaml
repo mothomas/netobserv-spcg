@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{DAEMONSET_NAME}}
+  namespace: {{CAPTURE_NAMESPACE}}
+  labels:
+    app: spcg-sensor
+    spcg.io/session: "{{SESSION_ID}}"
+spec:
+  selector:
+    matchLabels:
+      app: spcg-sensor
+      spcg.io/session: "{{SESSION_ID}}"
+  template:
+    metadata:
+      labels:
+        app: spcg-sensor
+        spcg.io/session: "{{SESSION_ID}}"
+    spec:
+      serviceAccountName: pcap-executor
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: netobserv-ebpf-agent
+          image: "{{AGENT_IMAGE}}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["BPF", "PERFMON", "NET_ADMIN"]
+              drop: ["ALL"]
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsUser: 0
+          env:
+            - name: CACHE_ACTIVE_TIMEOUT
+              value: "1s"
+            - name: ENABLE_PCA
+              value: "true"
+            - name: METRICS_ENABLE
+              value: "false"
+            - name: LOG_LEVEL
+              value: info
+            - name: FLOW_FILTER_RULES
+              value: '{{FLOW_FILTER_RULES}}'
+            - name: TC_ATTACH_MODE
+              value: "any"
+            - name: EXPORT
+              value: "direct-flp"
+            - name: FLP_CONFIG
+              value: '{{FLP_CONFIG}}'
+          volumeMounts:
+            - name: bpf-kernel-debug
+              mountPath: /sys/kernel/debug
+              mountPropagation: HostToContainer
+      volumes:
+        - name: bpf-kernel-debug
+          hostPath:
+            path: /sys/kernel/debug
+            type: Directory

@@ -1,0 +1,12 @@
+[
+  {
+    "direction": "",
+    "ip_cidr": "0.0.0.0/0",
+    "protocol": "",
+    "source_port": 0,
+    "destination_port": 0,
+    "port": 0,
+    "action": "Accept",
+    "drops": false
+  }
+]
