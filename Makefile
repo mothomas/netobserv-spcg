@@ -5,9 +5,11 @@ GEN_DIR=api/proto/capture/v1
 
 proto:
 	@command -v protoc >/dev/null || (echo "install protoc"; exit 1)
+	@command -v protoc-gen-go >/dev/null || go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	@command -v protoc-gen-go-grpc >/dev/null || go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	protoc -I api/proto \
-		--go_out=$(GEN_DIR) --go_opt=paths=source_relative \
-		--go-grpc_out=$(GEN_DIR) --go-grpc_opt=paths=source_relative \
+		--go_out=. --go_opt=module=github.com/netobserv/spcg \
+		--go-grpc_out=. --go-grpc_opt=module=github.com/netobserv/spcg \
 		$(PROTO_DIR)/capture.proto
 
 build:

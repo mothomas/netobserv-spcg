@@ -6,9 +6,7 @@ capture:
   backend:
     image: spcg-backend-engine:latest
     replicas: 1
-  sniffer:
-    image: quay.io/netobserv/netobserv-ebpf-agent:release-1.8
-  netobservBin: oc-netobserv
+  agentImage: quay.io/netobserv/netobserv-ebpf-agent:release-1.8
 
 frontend:
   uiPortal:

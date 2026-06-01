@@ -11,26 +11,30 @@ SPCG runs on **any CNCF-compliant Kubernetes cluster** (1.26+) with eBPF-capable
 | Namespace / workload listing | Yes (RBAC-scoped) | Yes |
 | Owner-based capture | Yes | Yes |
 | netobserv eBPF sensors | Yes (privileged or CAP_BPF) | Yes (SCC or capabilities) |
-| UI Ingress | `manifests/ingress-k8s.yaml` | `manifests/route-openshift.yaml` |
-| Privileged capture SA | `securityContext.privileged` | `rbac-capture.yaml` + SCC |
+| UI access | NodePort `:30080` on `spcg-frontend` | `manifests/openshift/route-openshift.yaml` |
+| Privileged capture SA | `securityContext.privileged` | `manifests/openshift/rbac-capture.yaml` + SCC |
 
 ## Deploy on vanilla Kubernetes
 
 ```bash
-kubectl apply -f manifests/namespace-capture.yaml
-kubectl apply -f manifests/namespace-frontend.yaml
-kubectl apply -f manifests/rbac-capture-k8s.yaml   # not rbac-capture.yaml
-kubectl apply -f manifests/network-policies.yaml
-kubectl apply -f manifests/deployment-capture.yaml
-kubectl apply -f manifests/deployment-frontend.yaml
-kubectl apply -f manifests/ingress-k8s.yaml        # optional
+kubectl apply -k manifests/
+```
+
+Uses **NodePort `30080`** on `spcg-frontend` (UI + `/api` proxied to ui-portal in-cluster). No Ingress or Cilium LB required.
+
+Open: **http://\<node-ip\>:30080**
+
+**OpenShift:**
+
+```bash
+kubectl apply -k manifests/openshift/
 ```
 
 Ensure the capture DaemonSet can run with **privileged** or **BPF + NET_ADMIN + PERFMON** (see netobserv-ebpf-agent docs). Pod Security **privileged** on `pcap-capture` is required for the dynamic sensors.
 
 ## Cilium CNI
 
-Clusters using **Cilium** are supported. See [cilium.md](./cilium.md) for eBPF coexistence, interface tuning, and dedup settings.
+Clusters using **Cilium** are supported; control-plane tolerations include `node.cilium.io/agent-not-ready` where needed.
 
 ## netobserv CLI binary
 

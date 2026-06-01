@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: spcg-frontend
+  namespace: pcap-frontend
+spec:
+  type: NodePort
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      nodePort: 30080

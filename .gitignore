@@ -5,3 +5,8 @@ frontend/.next/
 *.key
 .env
 .DS_Store
+.kube/
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+admin.conf

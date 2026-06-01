@@ -3,5 +3,5 @@
 @tailwind utilities;
 
 body {
-  @apply bg-spcg-bg text-slate-100 antialiased;
+  @apply bg-spcg-bg text-slate-900 antialiased;
 }

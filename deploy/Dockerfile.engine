@@ -1,12 +1,12 @@
-FROM golang:1.22-alpine AS build
+FROM golang:1.23-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -buildvcs=false -o /backend-engine ./cmd/backend-engine
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
-RUN microdnf install -y openssl && microdnf clean all
+FROM alpine:3.20
+RUN apk add --no-cache openssl ca-certificates
 COPY --from=build /backend-engine /usr/local/bin/backend-engine
 USER 1001
 EXPOSE 8443

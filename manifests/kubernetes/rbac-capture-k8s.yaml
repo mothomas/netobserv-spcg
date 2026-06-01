@@ -12,11 +12,14 @@ metadata:
   name: spcg-pcap-executor
 rules:
   - apiGroups: [""]
-    resources: ["namespaces", "pods", "nodes"]
+    resources: ["namespaces", "pods", "nodes", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["nodes/proxy", "pods/exec"]
     verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["daemonsets"]
     verbs: ["get", "list", "watch", "create", "delete"]

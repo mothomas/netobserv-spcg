@@ -6,7 +6,7 @@ Namespace-scoped, zero-trust packet capture platform wrapping [netobserv-cli](ht
 
 | Namespace | Tier | Workloads | PSS |
 |-----------|------|-----------|-----|
-| **`pcap-capture`** | Capture | `spcg-backend-engine`, `spcg-sniffer` (netobserv eBPF DaemonSet) | `privileged` |
+| **`pcap-capture`** | Capture | `spcg-backend-engine`, per-session netobserv eBPF DaemonSet | `privileged` |
 | **`pcap-frontend`** | Frontend | `spcg-ui-portal` (Go API), `spcg-frontend` (Next.js) | `restricted` |
 
 The UI portal in `pcap-frontend` calls the gRPC engine in `pcap-capture` over mTLS. On capture start, the engine **deploys netobserv eBPF sensors** (DaemonSet manifests derived from [netobserv-cli](https://github.com/netobserv/netobserv-cli)) and receives packets via [flowlogs-pipeline](https://github.com/netobserv/flowlogs-pipeline) gRPC — the same path the CLI uses locally.
@@ -26,15 +26,25 @@ The UI portal in `pcap-frontend` calls the gRPC engine in `pcap-capture` over mT
 
 ```bash
 make build
-NETOBSERV_BIN=oc-netobserv ./bin/backend-engine
+./bin/backend-engine
 ENGINE_GRPC_ADDR=localhost:8443 ./bin/ui-portal
 cd frontend && npm install && npm run dev
 ```
 
-## Deploy (OpenShift)
+## Deploy
+
+**Vanilla Kubernetes** (NodePort):
 
 ```bash
 kubectl apply -k manifests/
+```
+
+Open **http://100.123.189.64:30080** (or **http://\<node-ip\>:30080**) — UI and `/api` on one port.
+
+**OpenShift** (Route + SCC):
+
+```bash
+kubectl apply -k manifests/openshift/
 ```
 
 Or Helm:
@@ -66,5 +76,5 @@ GitHub Actions builds and pushes three images on push to `main` and on `v*` tags
 
 - Kubernetes API: user's kubeconfig identity or bearer token (RBAC-scoped) via `spcg-ui-portal`.
 - `pcap-frontend`: `automountServiceAccountToken: false` on UI pods.
-- `pcap-capture`: default-deny ingress; engine accepts gRPC only from `spcg-ui-portal` in `pcap-frontend`; sniffer accepts traffic only from `spcg-backend-engine`.
+- `pcap-capture`: default-deny ingress; engine accepts gRPC from `spcg-ui-portal` and collector traffic from session sensors (ports 19000–19999).
 - AI triage credentials: in-memory per session only.

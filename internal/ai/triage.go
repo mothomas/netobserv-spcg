@@ -55,15 +55,26 @@ func NewTriageClient(proxyURL string) *TriageClient {
 
 func (c *TriageClient) Run(ctx context.Context, req TriageRequest) (*TriageResponse, error) {
 	sanitized := Sanitize(req.TraceText)
-	payload := triageSystemPrompt + "\n\n--- TRACE ---\n" + sanitized
+	provider, model, endpoint := legacyTargetMapping(req.TargetType, req.APIEndpoint)
+	chat := NewChatClient(req.ProxyURL)
+	resp, err := chat.Chat(ctx, ChatRequest{
+		Provider: provider, Model: model, APIEndpoint: endpoint, APIKey: req.BearerToken,
+		Messages: BuildTriageMessages(sanitized, ""),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &TriageResponse{Summary: resp.Reply, RawModelOut: resp.RawModelOut}, nil
+}
 
-	switch req.TargetType {
+func legacyTargetMapping(t TargetType, endpoint string) (Provider, string, string) {
+	switch t {
 	case TargetOllama:
-		return c.callOllama(ctx, req.APIEndpoint, payload, req.BearerToken)
+		return ProviderOllama, "llama3.2", endpoint
 	case TargetBedrock, TargetGateway:
-		return c.callGeneric(ctx, req.APIEndpoint, payload, req.BearerToken)
+		return ProviderOpenAICompat, "", endpoint
 	default:
-		return nil, fmt.Errorf("unsupported AI target type: %s", req.TargetType)
+		return ProviderOpenAI, "", endpoint
 	}
 }
 
@@ -121,6 +132,26 @@ func (c *TriageClient) postJSON(ctx context.Context, endpoint, token string, bod
 }
 
 func extractSummary(raw string) string {
+	var anthropic struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal([]byte(raw), &anthropic) == nil && len(anthropic.Content) > 0 {
+		return strings.TrimSpace(anthropic.Content[0].Text)
+	}
+	var gemini struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if json.Unmarshal([]byte(raw), &gemini) == nil && len(gemini.Candidates) > 0 && len(gemini.Candidates[0].Content.Parts) > 0 {
+		return strings.TrimSpace(gemini.Candidates[0].Content.Parts[0].Text)
+	}
 	var m map[string]interface{}
 	if json.Unmarshal([]byte(raw), &m) == nil {
 		if r, ok := m["response"].(string); ok {

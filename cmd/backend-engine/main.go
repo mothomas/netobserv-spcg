@@ -17,6 +17,7 @@ import (
 )
 
 func main() {
+	log.Printf("spcg-backend-engine build=%s", envOr("SPCG_BUILD_ID", "dev"))
 	addr := envOr("ENGINE_GRPC_ADDR", ":8443")
 
 	var client kubernetes.Interface

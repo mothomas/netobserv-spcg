@@ -1,0 +1,19 @@
+# Vanilla Kubernetes — NodePort + Docker Hub images (no Ingress/Cilium LB).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+  - rbac-capture-k8s.yaml
+images:
+  - name: spcg-backend-engine
+    newName: docker.io/mothomas/spcg-backend-engine
+    newTag: stream-fix-20260601
+  - name: spcg-ui-portal
+    newName: docker.io/mothomas/spcg-ui-portal
+    newTag: latest
+  - name: spcg-frontend
+    newName: docker.io/mothomas/spcg-frontend
+    newTag: latest
+patches:
+  - path: patches/control-plane-tolerations.yaml
+  - path: patches/nodeport-frontend.yaml

@@ -7,7 +7,7 @@ metadata:
     app: spcg-ui-portal
     spcg.io/tier: frontend
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: spcg-ui-portal
@@ -24,8 +24,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ui-portal
-          image: spcg-ui-portal:latest
-          imagePullPolicy: IfNotPresent
+          image: docker.io/mothomas/spcg-ui-portal:graph-fix-20260601
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: http
@@ -59,6 +59,10 @@ metadata:
   name: spcg-ui-portal
   namespace: pcap-frontend
 spec:
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
   selector:
     app: spcg-ui-portal
   ports:
@@ -75,7 +79,7 @@ metadata:
     app: spcg-frontend
     spcg.io/tier: frontend
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: spcg-frontend
@@ -92,14 +96,18 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: spcg-frontend:latest
-          imagePullPolicy: IfNotPresent
+          image: docker.io/mothomas/spcg-frontend:enriched-20260601
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
               name: http
           env:
             - name: NODE_ENV
               value: production
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: SPCG_API_URL
+              value: "http://spcg-ui-portal.pcap-frontend.svc.cluster.local:80"
           resources:
             requests:
               cpu: 100m

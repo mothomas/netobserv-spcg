@@ -9,6 +9,3 @@ var packetCaptureDaemonSetTemplate string
 
 //go:embed manifests/collector-pipeline-config.json
 var collectorPipelineConfigJSON string
-
-//go:embed manifests/flow-filter.json
-var flowFilterTemplateJSON string

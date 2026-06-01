@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-traffic
+  labels:
+    app.kubernetes.io/name: demo-traffic
+    spcg.io/demo: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ping-worker
+  namespace: demo-traffic
+  labels:
+    app: ping-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ping-worker
+  template:
+    metadata:
+      labels:
+        app: ping-worker
+        spcg.io/demo: "true"
+    spec:
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node.cilium.io/agent-not-ready
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: worker
+          image: curlimages/curl:8.7.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              echo "demo-traffic worker starting (ICMP via ping sidecar pattern + HTTP probes)"
+              while true; do
+                TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                echo "[$TS] curl https://www.google.com/generate_204"
+                curl -sS -o /dev/null -w "google: %{http_code}\n" --connect-timeout 5 https://www.google.com/generate_204 || echo "google: failed"
+                echo "[$TS] curl https://cloudflare.com/cdn-cgi/trace"
+                curl -sS --connect-timeout 5 https://cloudflare.com/cdn-cgi/trace | head -3 || echo "cloudflare: failed"
+                echo "[$TS] curl https://1.1.1.1"
+                curl -sS -o /dev/null -w "1.1.1.1: %{http_code}\n" --connect-timeout 5 -k https://1.1.1.1 || echo "1.1.1.1: failed"
+                sleep 10
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+---
+# ICMP ping to 8.8.8.8 (requires NET_RAW — separate tiny pod).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ping-icmp
+  namespace: demo-traffic
+  labels:
+    app: ping-icmp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ping-icmp
+  template:
+    metadata:
+      labels:
+        app: ping-icmp
+        spcg.io/demo: "true"
+    spec:
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node.cilium.io/agent-not-ready
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: ping
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              while true; do
+                TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                echo "[$TS] ping -c 3 8.8.8.8"
+                ping -c 3 -W 2 8.8.8.8 || echo "ping 8.8.8.8 failed"
+                echo "[$TS] ping -c 3 google.com"
+                ping -c 3 -W 2 google.com || echo "ping google.com failed"
+                sleep 15
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_RAW"]
+              drop: ["ALL"]
+            runAsNonRoot: false
+            runAsUser: 0
+            seccompProfile:
+              type: RuntimeDefault

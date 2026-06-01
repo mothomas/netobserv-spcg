@@ -3,32 +3,32 @@ package sensor
 import (
 	"context"
 	"fmt"
-	"sync"
+	"log"
+	"sync/atomic"
 
-	"github.com/netobserv/flowlogs-pipeline/pkg/pipeline/write/grpc"
-	"github.com/netobserv/flowlogs-pipeline/pkg/pipeline/write/grpc/genericmap"
+	pktgrpc "github.com/netobserv/netobserv-ebpf-agent/pkg/grpc/packet"
+	"github.com/netobserv/netobserv-ebpf-agent/pkg/pbpacket"
 )
 
-// PacketCollector receives packet flows from netobserv eBPF agents via flowlogs-pipeline gRPC.
+// PacketCollector receives PCA packets from netobserv eBPF agents (EXPORT=grpc packet API).
 type PacketCollector struct {
-	port   int
-	flows  chan *genericmap.Flow
-	server *grpc.CollectorServer
-	wg     sync.WaitGroup
+	port      int
+	packets   chan *pbpacket.Packet
+	server    *pktgrpc.CollectorServer
+	pktCount  atomic.Uint64
 }
 
 func StartPacketCollector(port int) (*PacketCollector, error) {
-	flows := make(chan *genericmap.Flow, 256)
-	srv, err := grpc.StartCollector(port, flows)
+	packets := make(chan *pbpacket.Packet, 256)
+	srv, err := pktgrpc.StartCollector(port, packets)
 	if err != nil {
-		return nil, fmt.Errorf("failed starting flowlogs-pipeline grpc collector on port %d: %w", port, err)
+		return nil, fmt.Errorf("failed starting netobserv packet grpc collector on port %d: %w", port, err)
 	}
-	return &PacketCollector{port: port, flows: flows, server: srv}, nil
+	log.Printf("spcg-collector: netobserv packet grpc listening on :%d", port)
+	return &PacketCollector{port: port, packets: packets, server: srv}, nil
 }
 
 func (c *PacketCollector) Port() int { return c.port }
-
-func (c *PacketCollector) Flows() <-chan *genericmap.Flow { return c.flows }
 
 func (c *PacketCollector) Close() {
 	if c.server != nil {
@@ -36,22 +36,27 @@ func (c *PacketCollector) Close() {
 	}
 }
 
-// StreamContext pumps decoded PCAP chunks to the output channel until ctx is done.
-func (c *PacketCollector) StreamContext(ctx context.Context, out chan<- []byte) error {
+// StreamContext pumps PCA packets until ctx is done.
+func (c *PacketCollector) StreamContext(ctx context.Context, out chan<- PacketRecord) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case flow, ok := <-c.flows:
+		case pkt, ok := <-c.packets:
 			if !ok {
 				return nil
 			}
-			data, err := ExtractPacketBytes(flow)
+			n := c.pktCount.Add(1)
+			if n == 1 || n%500 == 0 {
+				log.Printf("spcg-collector: port=%d packets=%d", c.port, n)
+			}
+			data, err := ExtractPacketBytesFromPB(pkt)
 			if err != nil || len(data) == 0 {
 				continue
 			}
+			meta := FlowMetadataFromFrame(data)
 			select {
-			case out <- data:
+			case out <- PacketRecord{Data: data, Meta: meta}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}

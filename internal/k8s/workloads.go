@@ -21,6 +21,8 @@ type PodDetail struct {
 	UID            string     `json:"uid"`
 	Status         string     `json:"status"`
 	PodIP          string     `json:"pod_ip"`
+	PodIPs         []string   `json:"pod_ips,omitempty"`
+	HostIP         string     `json:"host_ip,omitempty"`
 	NodeName       string     `json:"node_name"`
 	LabelSelector  string     `json:"label_selector,omitempty"`
 	Owners         []OwnerRef `json:"owners"`
@@ -116,11 +118,33 @@ func podToDetail(ctx context.Context, cs kubernetes.Interface, p *corev1.Pod) Po
 		UID:           string(p.UID),
 		Status:        string(p.Status.Phase),
 		PodIP:         p.Status.PodIP,
+		PodIPs:        podIPs(p),
+		HostIP:        p.Status.HostIP,
 		NodeName:      p.Spec.NodeName,
 		LabelSelector: labelsFromPod(p),
 		Owners:        owners,
 		PrimaryOwner:  primary,
 	}
+}
+
+func podIPs(p *corev1.Pod) []string {
+	out := make([]string, 0, len(p.Status.PodIPs))
+	seen := map[string]struct{}{}
+	if p.Status.PodIP != "" {
+		out = append(out, p.Status.PodIP)
+		seen[p.Status.PodIP] = struct{}{}
+	}
+	for _, pip := range p.Status.PodIPs {
+		if pip.IP == "" {
+			continue
+		}
+		if _, ok := seen[pip.IP]; ok {
+			continue
+		}
+		seen[pip.IP] = struct{}{}
+		out = append(out, pip.IP)
+	}
+	return out
 }
 
 func labelsFromPod(p *corev1.Pod) string {

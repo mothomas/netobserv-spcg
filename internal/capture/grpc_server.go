@@ -2,9 +2,11 @@ package capture
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"io"
+	"log"
 	"sync"
 	"time"
 
@@ -51,38 +53,92 @@ func (e *EngineServer) StreamPackets(stream capturev1.CaptureService_StreamPacke
 		})
 	}
 
+	log.Printf("capture stream session=%s targets=%d port=%d", sessionID, len(targets), port)
+
 	sess, err := e.SensorMgr.StartSession(ctx, sessionID, port, sensorTargets)
 	if err != nil {
+		log.Printf("capture session=%s sensor start failed: %v", sessionID, err)
 		return status.Errorf(codes.Internal, "failed starting netobserv eBPF sensors: %v", err)
 	}
+	log.Printf("capture session=%s sensor ready ds=%s collector_port=%d", sessionID, sess.DaemonSet, port)
 	e.sessions.Store(sessionID, sess)
 	defer func() {
 		_ = e.SensorMgr.StopSession(context.Background(), sess)
 		e.sessions.Delete(sessionID)
 	}()
 
-	rawCh := make(chan []byte, 128)
+	rawCh := make(chan sensor.PacketRecord, 4096)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- sess.Collector.StreamContext(ctx, rawCh)
 	}()
 
 	var seq, cum, windowBytes, pps uint64
+	var received, forwarded, skippedEmpty uint64
 	lastWindow := time.Now()
+	lastStats := time.Now()
+
+	sendPodRefresh := func(ev sensor.PodRefreshEvent) error {
+		type podRow struct {
+			Namespace string `json:"namespace"`
+			Name      string `json:"name"`
+			UID       string `json:"uid"`
+			OwnerKind string `json:"owner_kind,omitempty"`
+			PodIP     string `json:"pod_ip,omitempty"`
+		}
+		rows := make([]podRow, 0, len(ev.Pods))
+		for _, p := range ev.Pods {
+			kind := ""
+			if p.PrimaryOwner != nil {
+				kind = p.PrimaryOwner.Kind
+			}
+			rows = append(rows, podRow{
+				Namespace: p.Namespace, Name: p.Name, UID: p.UID,
+				OwnerKind: kind, PodIP: p.PodIP,
+			})
+		}
+		payload, _ := json.Marshal(map[string]interface{}{
+			"event": "pod_refresh",
+			"pods":  rows,
+		})
+		seq++
+		return stream.Send(&capturev1.CaptureChunk{
+			SessionId:       sessionID,
+			PodName:         "capture-targets",
+			StitchedRestart: true,
+			Sequence:        seq,
+			FlowMetadata:    string(payload),
+		})
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case ev, ok := <-sess.RefreshCh:
+			if !ok {
+				continue
+			}
+			if err := sendPodRefresh(ev); err != nil {
+				return fmt.Errorf("failed sending pod refresh: %w", err)
+			}
 		case err := <-errCh:
 			if err != nil && err != context.Canceled {
 				return status.Errorf(codes.Internal, "netobserv collector stream ended: %v", err)
 			}
 			return nil
-		case data, ok := <-rawCh:
+		case rec, ok := <-rawCh:
 			if !ok {
 				return nil
 			}
+			received++
+			if len(rec.Data) == 0 {
+				skippedEmpty++
+				continue
+			}
+			// Pod scoping is enforced upstream in netobserv eBPF FLOW_FILTER_RULES.
+			forwarded++
+			data := rec.Data
 			now := time.Now()
 			if now.Sub(lastWindow) >= time.Second {
 				pps = windowBytes
@@ -93,16 +149,33 @@ func (e *EngineServer) StreamPackets(stream capturev1.CaptureService_StreamPacke
 			cum += uint64(len(data))
 			seq++
 
+			var metaJSON string
+			if len(rec.Meta) > 0 {
+				if b, err := json.Marshal(rec.Meta); err == nil {
+					metaJSON = string(b)
+				}
+			}
+
+			podLabel := aggregatePodName(targets)
+			if ns, name, ok := sensor.CapturePodFromMeta(rec.Meta, sess.TrackedPods); ok {
+				podLabel = ns + "/" + name
+			}
 			chunk := &capturev1.CaptureChunk{
 				SessionId:       sessionID,
-				PodName:         aggregatePodName(targets),
+				PodName:         podLabel,
 				Data:            data,
 				Sequence:        seq,
 				PacketsPerSec:   pps,
 				CumulativeBytes: cum,
+				FlowMetadata:    metaJSON,
 			}
 			if err := stream.Send(chunk); err != nil {
 				return fmt.Errorf("failed sending capture chunk: %w", err)
+			}
+			if now := time.Now(); now.Sub(lastStats) >= 10*time.Second {
+				log.Printf("capture session=%s stats received=%d forwarded=%d skipped_empty=%d cum_bytes=%d",
+					sessionID, received, forwarded, skippedEmpty, cum)
+				lastStats = now
 			}
 		}
 	}

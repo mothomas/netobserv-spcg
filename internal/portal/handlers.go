@@ -13,6 +13,7 @@ import (
 	capturev1 "github.com/netobserv/spcg/api/proto/capture/v1"
 	"github.com/netobserv/spcg/internal/ai"
 	"github.com/netobserv/spcg/internal/auth"
+	"github.com/netobserv/spcg/internal/capture/sensor"
 	spcgk8s "github.com/netobserv/spcg/internal/k8s"
 	"github.com/netobserv/spcg/internal/pcap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,10 +28,11 @@ type Server struct {
 }
 
 type aiSessionCreds struct {
-	proxyURL    string
-	targetType  ai.TargetType
-	apiEndpoint string
-	bearer      []byte
+	proxyURL       string
+	targetType     ai.TargetType
+	apiEndpoint    string
+	bearer         []byte
+	cursorAgentID  string
 }
 
 var (
@@ -47,7 +49,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/v1/workloads", s.handleWorkloads)
 	mux.HandleFunc("/api/v1/capture/stream", s.handleCaptureStream)
 	mux.HandleFunc("/api/v1/capture/", s.handleCaptureDownload)
-	mux.HandleFunc("/api/v1/ai/triage", s.handleAITriage)
+	s.registerAIRoutes(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -309,6 +311,18 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 		sessNS = req.Namespaces[0]
 	}
 	sess := pcap.NewSession(sessNS)
+	tracked := make([]pcap.TrackedPod, 0, len(resolved.Pods))
+	for _, p := range resolved.Pods {
+		kind := ""
+		if p.PrimaryOwner != nil {
+			kind = p.PrimaryOwner.Kind
+		}
+		tracked = append(tracked, pcap.TrackedPod{
+			Namespace: p.Namespace, Name: p.Name, UID: p.UID, OwnerKind: kind,
+			PodIP: p.PodIP, PodIPs: append([]string(nil), p.PodIPs...),
+		})
+	}
+	sess.SetTrackedPods(tracked)
 	pcap.Store(sess)
 
 	meta, _ := json.Marshal(map[string]interface{}{
@@ -360,18 +374,63 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 		for {
 			chunk, err := stream.Recv()
 			if err != nil {
+				fmt.Fprintf(w, "event: error\ndata: %v\n\n", err)
+				flusher.Flush()
 				return
 			}
-			sess.Append(chunk.GetPodName(), chunk.GetPodUid(), chunk.GetData())
-			payload, _ := json.Marshal(map[string]interface{}{
+			meta := chunk.GetFlowMetadata()
+			if chunk.GetStitchedRestart() && meta != "" {
+				var refresh struct {
+					Event string                   `json:"event"`
+					Pods  []map[string]interface{} `json:"pods"`
+				}
+				if json.Unmarshal([]byte(meta), &refresh) == nil && refresh.Event == "pod_refresh" {
+					nt := make([]pcap.TrackedPod, 0, len(refresh.Pods))
+					for _, p := range refresh.Pods {
+						ns, _ := p["namespace"].(string)
+						name, _ := p["name"].(string)
+						uid, _ := p["uid"].(string)
+						kind, _ := p["owner_kind"].(string)
+						if ns != "" && name != "" {
+							podIP, _ := p["pod_ip"].(string)
+							nt = append(nt, pcap.TrackedPod{
+								Namespace: ns, Name: name, UID: uid, OwnerKind: kind, PodIP: podIP,
+							})
+						}
+					}
+					if len(nt) > 0 {
+						sess.SetTrackedPods(nt)
+					}
+					payload, _ := json.Marshal(map[string]interface{}{
+						"session_id": sess.ID, "pods": refresh.Pods, "stitched": true,
+					})
+					fmt.Fprintf(w, "event: pod_refresh\ndata: %s\n\n", payload)
+					flusher.Flush()
+				}
+			}
+			podName, podUID := chunk.GetPodName(), chunk.GetPodUid()
+			if meta != "" {
+				var fm map[string]interface{}
+				if json.Unmarshal([]byte(meta), &fm) == nil {
+					if ns, name, ok := sensor.CapturePodFromMeta(sensor.FlowMetadata(fm), trackedPodsFromSession(sess)); ok {
+						podName = ns + "/" + name
+					}
+				}
+			}
+			sess.AppendFlow(podName, podUID, chunk.GetData(), meta, chunk.GetSequence())
+			chunkPayload := map[string]interface{}{
 				"session_id":       chunk.GetSessionId(),
-				"pod_name":         chunk.GetPodName(),
+				"pod_name":         podName,
 				"sequence":         chunk.GetSequence(),
 				"chunk_size":       len(chunk.GetData()),
 				"packets_per_sec":  chunk.GetPacketsPerSec(),
 				"cumulative_bytes": chunk.GetCumulativeBytes(),
 				"stitched_restart": chunk.GetStitchedRestart(),
-			})
+			}
+			if meta != "" {
+				chunkPayload["flow_metadata"] = json.RawMessage(meta)
+			}
+			payload, _ := json.Marshal(chunkPayload)
 			fmt.Fprintf(w, "event: chunk\ndata: %s\n\n", payload)
 			flusher.Flush()
 		}
@@ -417,7 +476,7 @@ func (s *Server) handleCaptureDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
-	w.Header().Set("Content-Type", "application/vnd.tcpdump.pcap")
+	w.Header().Set("Content-Type", "application/vnd.tcpdump.pcapng")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	_, _ = io.Copy(w, bytes.NewReader(data))
 }
@@ -450,6 +509,7 @@ func (s *Server) handleAITriage(w http.ResponseWriter, r *http.Request) {
 		}
 		aiSessionsMu.Unlock()
 		ai.ResetMaps()
+		ai.DropScrubber(body.SessionID)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -500,6 +560,18 @@ func hexPreview(b []byte, max int) string {
 		sb.WriteByte(' ')
 	}
 	return sb.String()
+}
+
+func trackedPodsFromSession(sess *pcap.Session) []spcgk8s.PodDetail {
+	tracked := sess.TrackedPods()
+	out := make([]spcgk8s.PodDetail, 0, len(tracked))
+	for _, t := range tracked {
+		out = append(out, spcgk8s.PodDetail{
+			Namespace: t.Namespace, Name: t.Name, UID: t.UID,
+			PodIP: t.PodIP, PodIPs: append([]string(nil), t.PodIPs...),
+		})
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {

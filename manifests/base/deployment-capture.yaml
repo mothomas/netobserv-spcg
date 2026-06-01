@@ -20,16 +20,16 @@ spec:
       serviceAccountName: pcap-executor
       containers:
         - name: backend-engine
-          image: spcg-backend-engine:latest
-          imagePullPolicy: IfNotPresent
+          image: docker.io/mothomas/spcg-backend-engine:topo-stats-20260601
+          imagePullPolicy: Always
           ports:
             - containerPort: 8443
               name: grpc
           env:
+            - name: SPCG_BUILD_ID
+              value: "topo-stats-20260601"
             - name: ENGINE_GRPC_ADDR
               value: ":8443"
-            - name: NETOBSERV_BIN
-              value: oc-netobserv
             - name: COLLECTOR_HOST
               valueFrom:
                 fieldRef:

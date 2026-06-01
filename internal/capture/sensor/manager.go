@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"text/template"
 	"time"
 
+	spcgk8s "github.com/netobserv/spcg/internal/k8s"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -55,7 +57,9 @@ type Session struct {
 	Port         int
 	DaemonSet    string
 	Collector    *PacketCollector
+	TrackedPods  []spcgk8s.PodDetail
 	CancelDeploy context.CancelFunc
+	RefreshCh    chan PodRefreshEvent
 }
 
 func (m *Manager) StartSession(ctx context.Context, sessionID string, port int, targets []Target) (*Session, error) {
@@ -72,7 +76,12 @@ func (m *Manager) StartSession(ctx context.Context, sessionID string, port int, 
 	}
 
 	dsName := daemonSetName(sessionID)
-	manifest, err := m.renderDaemonSet(sessionID, dsName, port, targets)
+	resolvedPods, err := m.resolveTargetPods(ctx, targets)
+	if err != nil {
+		collector.Close()
+		return nil, fmt.Errorf("failed resolving capture pods: %w", err)
+	}
+	manifest, err := m.renderDaemonSet(sessionID, dsName, port, targets, resolvedPods)
 	if err != nil {
 		collector.Close()
 		return nil, fmt.Errorf("failed rendering netobserv sensor manifest: %w", err)
@@ -84,6 +93,7 @@ func (m *Manager) StartSession(ctx context.Context, sessionID string, port int, 
 		collector.Close()
 		return nil, fmt.Errorf("failed deploying netobserv eBPF sensor: %w", err)
 	}
+	log.Printf("spcg-sensor: deployed daemonset %s/%s on collector port %d", m.CaptureNamespace, dsName, port)
 
 	if err := m.waitDaemonSetReady(deployCtx, dsName, 3*time.Minute); err != nil {
 		cancel()
@@ -92,10 +102,13 @@ func (m *Manager) StartSession(ctx context.Context, sessionID string, port int, 
 		return nil, fmt.Errorf("failed waiting for netobserv sensor readiness: %w", err)
 	}
 
-	return &Session{
+	sess := &Session{
 		ID: sessionID, Port: port, DaemonSet: dsName,
-		Collector: collector, CancelDeploy: cancel,
-	}, nil
+		Collector: collector, TrackedPods: resolvedPods, CancelDeploy: cancel,
+		RefreshCh: make(chan PodRefreshEvent, 2),
+	}
+	go m.watchPods(deployCtx, sess, targets, podsFingerprint(resolvedPods))
+	return sess, nil
 }
 
 func (m *Manager) StopSession(ctx context.Context, sess *Session) error {
@@ -116,26 +129,24 @@ func (m *Manager) StopSession(ctx context.Context, sess *Session) error {
 	return nil
 }
 
-func (m *Manager) renderDaemonSet(sessionID, dsName string, port int, targets []Target) (string, error) {
-	flp, err := m.buildFLPConfig(port, targets)
-	if err != nil {
-		return "", err
-	}
-	filters := buildFlowFilterRules(targets)
-
+func (m *Manager) renderDaemonSet(sessionID, dsName string, port int, targets []Target, resolvedPods []spcgk8s.PodDetail) (string, error) {
+	filters := buildEBPFFilterRules(resolvedPods)
 	tmpl, err := template.New("ds").Parse(packetCaptureDaemonSetTemplate)
 	if err != nil {
 		return "", fmt.Errorf("failed parsing daemonset template: %w", err)
 	}
 	var buf bytes.Buffer
-	flp = strings.ReplaceAll(flp, "'", "''")
+	buildID := envOr("SPCG_BUILD_ID", "dev")
+	log.Printf("spcg-sensor: render ds=%s build=%s export=grpc target=%s:%d", dsName, buildID, m.CollectorHost, port)
 	err = tmpl.Execute(&buf, map[string]string{
 		"DAEMONSET_NAME":    dsName,
 		"CAPTURE_NAMESPACE": m.CaptureNamespace,
 		"SESSION_ID":        sessionID,
 		"AGENT_IMAGE":       m.AgentImage,
-		"FLOW_FILTER_RULES": filters,
-		"FLP_CONFIG":        flp,
+		"BUILD_ID":          buildID,
+		"COLLECTOR_HOST":     m.CollectorHost,
+		"COLLECTOR_PORT":     fmt.Sprintf("%d", port),
+		"FLOW_FILTER_RULES":  filters,
 	})
 	if err != nil {
 		return "", err
@@ -143,62 +154,10 @@ func (m *Manager) renderDaemonSet(sessionID, dsName string, port int, targets []
 	return buf.String(), nil
 }
 
-func (m *Manager) buildFLPConfig(port int, targets []Target) (string, error) {
+func (m *Manager) buildFLPConfig(port int, _ []Target, _ []spcgk8s.PodDetail) (string, error) {
 	cfg := strings.ReplaceAll(collectorPipelineConfigJSON, "{{TARGET_HOST}}", m.CollectorHost)
 	cfg = strings.ReplaceAll(cfg, "{{TARGET_PORT}}", fmt.Sprintf("%d", port))
-
-	// Optional keep_entry_query filter in FLP (netobserv-cli pattern).
-	query := buildKeepEntryQuery(targets)
-	if query == "" {
-		return compactJSONString(cfg)
-	}
-
-	var doc map[string]interface{}
-	if err := json.Unmarshal([]byte(cfg), &doc); err != nil {
-		return "", fmt.Errorf("failed parsing collector pipeline config: %w", err)
-	}
-	rule := map[string]interface{}{
-		"type":            "keep_entry_query",
-		"keepEntryQuery": query,
-	}
-	params, _ := doc["parameters"].([]interface{})
-	filterParam := map[string]interface{}{
-		"name": "filter",
-		"transform": map[string]interface{}{
-			"type":   "filter",
-			"filter": map[string]interface{}{"rules": []interface{}{rule}},
-		},
-	}
-	params = append(params, filterParam)
-	doc["parameters"] = params
-	pipe, _ := doc["pipeline"].([]interface{})
-	pipe = append(pipe,
-		map[string]interface{}{"name": "filter", "follows": "enrich"},
-		map[string]interface{}{"name": "send", "follows": "filter"},
-	)
-	// remove duplicate send follows enrich
-	filtered := make([]interface{}, 0, len(pipe))
-	seen := map[string]bool{}
-	for _, p := range pipe {
-		m, _ := p.(map[string]interface{})
-		name, _ := m["name"].(string)
-		if name == "send" && m["follows"] == "enrich" {
-			continue
-		}
-		key := name + fmt.Sprint(m["follows"])
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		filtered = append(filtered, p)
-	}
-	doc["pipeline"] = filtered
-
-	raw, err := json.Marshal(doc)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
+	return compactJSONString(cfg)
 }
 
 func compactJSONString(s string) (string, error) {
@@ -213,41 +172,78 @@ func compactJSONString(s string) (string, error) {
 	return string(b), nil
 }
 
-func buildFlowFilterRules(targets []Target) string {
-	base := strings.TrimSpace(flowFilterTemplateJSON)
-	_ = targets
-	return base
+func buildEBPFFilterRules(pods []spcgk8s.PodDetail) string {
+	type flowRule struct {
+		IPCidr   string `json:"ip_cidr"`
+		PeerCidr string `json:"peer_cidr,omitempty"`
+		Action   string `json:"action"`
+	}
+	rules := make([]flowRule, 0, len(pods)*2)
+	seen := map[string]struct{}{}
+	for _, p := range pods {
+		ips := p.PodIPs
+		if len(ips) == 0 && p.PodIP != "" {
+			ips = []string{p.PodIP}
+		}
+		for _, ip := range ips {
+			if ip == "" {
+				continue
+			}
+			cidr := podIPCidr(ip)
+			if _, ok := seen[cidr]; ok {
+				continue
+			}
+			seen[cidr] = struct{}{}
+			peer := "0.0.0.0/0"
+			if strings.Contains(ip, ":") {
+				peer = "::/0"
+			}
+			rules = append(rules, flowRule{IPCidr: cidr, PeerCidr: peer, Action: "Accept"})
+		}
+	}
+	if len(rules) == 0 {
+		return `[{"ip_cidr":"0.0.0.0/0","action":"Accept"}]`
+	}
+	b, err := json.Marshal(rules)
+	if err != nil {
+		return `[{"ip_cidr":"0.0.0.0/0","action":"Accept"}]`
+	}
+	return string(b)
 }
 
-func buildKeepEntryQuery(targets []Target) string {
-	var clauses []string
-	seen := map[string]struct{}{}
-	for _, t := range targets {
-		if t.Namespace == "" {
-			continue
-		}
-		var clause string
-		if t.WorkloadKind != "" && t.WorkloadName != "" {
-			clause = fmt.Sprintf(
-				`(SrcK8S_Namespace=="%s" && SrcK8S_OwnerType=="%s" && SrcK8S_OwnerName=="%s") || (DstK8S_Namespace=="%s" && DstK8S_OwnerType=="%s" && DstK8S_OwnerName=="%s")`,
-				t.Namespace, t.WorkloadKind, t.WorkloadName,
-				t.Namespace, t.WorkloadKind, t.WorkloadName,
-			)
-		} else if t.PodName != "" {
-			clause = fmt.Sprintf(
-				`(SrcK8S_Namespace=="%s" && SrcK8S_Name=="%s") || (DstK8S_Namespace=="%s" && DstK8S_Name=="%s")`,
-				t.Namespace, t.PodName, t.Namespace, t.PodName,
-			)
-		} else {
-			continue
-		}
-		if _, ok := seen[clause]; ok {
-			continue
-		}
-		seen[clause] = struct{}{}
-		clauses = append(clauses, "("+clause+")")
+func podIPCidr(ip string) string {
+	if strings.Contains(ip, ":") {
+		return ip + "/128"
 	}
-	return strings.Join(clauses, " || ")
+	return ip + "/32"
+}
+
+func (m *Manager) resolveTargetPods(ctx context.Context, targets []Target) ([]spcgk8s.PodDetail, error) {
+	selections := make([]spcgk8s.CaptureSelection, 0, len(targets))
+	for _, t := range targets {
+		if t.PodName != "" {
+			selections = append(selections, spcgk8s.CaptureSelection{
+				Type: "pod", Namespace: t.Namespace, PodName: t.PodName, PodUID: t.PodUID, Port: t.Port,
+			})
+			continue
+		}
+		if t.WorkloadKind != "" && t.WorkloadName != "" {
+			selections = append(selections, spcgk8s.CaptureSelection{
+				Type: "owner", Namespace: t.Namespace,
+				OwnerKind: t.WorkloadKind, OwnerName: t.WorkloadName,
+				LabelSelector: t.LabelSelector, Port: t.Port,
+			})
+		}
+	}
+	if len(selections) == 0 {
+		return nil, fmt.Errorf("no resolvable capture targets")
+	}
+	resolved, err := spcgk8s.ResolveCaptureSelections(ctx, m.Client, selections)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("spcg-sensor: resolved %d pods from %d targets", len(resolved.Pods), len(targets))
+	return resolved.Pods, nil
 }
 
 func (m *Manager) applyDaemonSet(ctx context.Context, manifest string) error {

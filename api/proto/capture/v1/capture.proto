@@ -27,6 +27,8 @@ message CaptureChunk {
   bool stitched_restart = 6;
   uint64 packets_per_sec = 7;
   uint64 cumulative_bytes = 8;
+  // JSON object: netobserv K8s enrichment + L4 hints (SrcK8S_*, DstK8S_*, ports, proto).
+  string flow_metadata = 9;
 }
 
 // CaptureService streams raw packet bytes from privileged netobserv workers.

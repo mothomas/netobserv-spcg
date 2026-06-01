@@ -32,25 +32,35 @@ spec:
         - protocol: TCP
           port: 8443
 ---
+# Per-session netobserv sensors send flows to the engine collector (19000-19999).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-backend-to-sniffer
+  name: allow-sensor-to-backend-collector
   namespace: pcap-capture
 spec:
   podSelector:
     matchLabels:
-      app: spcg-sniffer
+      app: spcg-backend-engine
   policyTypes:
     - Ingress
   ingress:
+    # hostNetwork sensors connect from the node IP (not pod network identity).
+    - ports:
+        - protocol: TCP
+          port: 19000
+          endPort: 19999
     - from:
         - podSelector:
             matchLabels:
-              app: spcg-backend-engine
+              app: spcg-sensor
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pcap-capture
       ports:
         - protocol: TCP
-          port: 2055
+          port: 19000
+          endPort: 19999
 ---
 # --- pcap-frontend: egress only to capture tier ---
 apiVersion: networking.k8s.io/v1
@@ -130,6 +140,25 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+---
+# ui-portal must reach the API server from the user's uploaded kubeconfig (any cluster).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ui-portal-k8s-api-egress
+  namespace: pcap-frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: spcg-ui-portal
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
