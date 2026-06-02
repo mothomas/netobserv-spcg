@@ -163,6 +163,21 @@ func (s *Session) ExportPod(podUID string) ([]byte, error) {
 	return encodeFrames(buf.Frames), nil
 }
 
+// PodExportName returns a filesystem-safe pod name for PCAP downloads.
+func (s *Session) PodExportName(podUID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if buf, ok := s.pods[podUID]; ok && buf.PodName != "" {
+		return buf.PodName
+	}
+	for _, t := range s.Tracked {
+		if t.UID == podUID && t.Name != "" {
+			return t.Name
+		}
+	}
+	return podUID
+}
+
 func (s *Session) ExportMerged() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

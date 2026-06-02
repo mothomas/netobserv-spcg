@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AIDiagnosticModal } from "@/components/AIDiagnosticModal";
 import { ObservabilityWorkbench } from "@/components/ObservabilityWorkbench";
+import { AppShell } from "@/components/layout/AppShell";
+import { Sidebar } from "@/components/layout/Sidebar";
 import { fetchAIContext, type CaptureSummary, type FlowTopology } from "@/lib/ai";
 import { emptyTopology } from "@/lib/topology";
 import {
@@ -19,6 +21,9 @@ import {
   loginWithKubeconfig,
   loginWithToken,
   logout,
+  teardownCapture,
+  downloadCapturePod,
+  downloadCaptureMerged,
   type AuthMode,
   type LoginResponse,
   authHeaders,
@@ -65,6 +70,7 @@ export default function Home() {
 
   const [loginError, setLoginError] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
 
   const login = useCallback(async () => {
     setLoginError(null);
@@ -83,16 +89,37 @@ export default function Home() {
     }
   }, [authMode, token, kubeconfigText]);
 
+  const resetLocalState = useCallback(() => {
+    abortRef.current?.abort();
+    setCapturing(false);
+    setSessionId(null);
+    setTopology(null);
+    setCaptureSummary(null);
+    setMetrics({});
+    setCapturePods([]);
+    setCaptureError(null);
+  }, []);
+
   const handleLogout = useCallback(async () => {
+    abortRef.current?.abort();
     if (session?.session_id) {
       await logout(session.session_id).catch(() => undefined);
     }
+    resetLocalState();
     setSession(null);
     setLoggedIn(false);
     setWorkspaceReady(false);
     setKubeconfigText("");
     setToken("");
-  }, [session]);
+  }, [session, resetLocalState]);
+
+  const endCaptureSession = useCallback(async () => {
+    if (!session?.session_id || !sessionId) return;
+    abortRef.current?.abort();
+    setCapturing(false);
+    await teardownCapture(session.session_id, sessionId).catch(() => undefined);
+    resetLocalState();
+  }, [session, sessionId, resetLocalState]);
 
   const selectedNamespaces = useMemo(
     () => Object.keys(selectedNs).filter((n) => selectedNs[n]),
@@ -331,45 +358,79 @@ export default function Home() {
     return () => window.clearInterval(id);
   }, [sessionId, capturing, session?.session_id, loadFlowTopology]);
 
-  const downloadPod = (podUid: string) => {
-    if (!sessionId) return;
-    window.open(`/api/v1/capture/download/${sessionId}?pod_uid=${podUid}`, "_blank");
-  };
+  const exportPodList = useMemo((): { uid: string; name: string; namespace: string }[] => {
+    if (capturePods.length > 0) {
+      return capturePods
+        .filter((p) => p.uid)
+        .map((p) => ({ uid: p.uid!, name: p.name, namespace: p.namespace }));
+    }
+    return selectedPodList.map((p) => ({ uid: p.uid, name: p.name, namespace: p.namespace }));
+  }, [capturePods, selectedPodList]);
 
-  const mergePcap = () => {
-    if (!sessionId) return;
-    window.open(`/api/v1/capture/merge/${sessionId}`, "_blank");
-  };
+  const handleDownloadPod = useCallback(
+    async (pod: { uid: string; name: string }) => {
+      if (!session?.session_id || !sessionId) return;
+      setExportBusy(true);
+      setCaptureError(null);
+      try {
+        await downloadCapturePod(session.session_id, sessionId, pod.uid, pod.name);
+      } catch (e) {
+        setCaptureError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setExportBusy(false);
+      }
+    },
+    [session, sessionId]
+  );
+
+  const handleDownloadMerged = useCallback(async () => {
+    if (!session?.session_id || !sessionId) return;
+    setExportBusy(true);
+    setCaptureError(null);
+    try {
+      await downloadCaptureMerged(session.session_id, sessionId);
+    } catch (e) {
+      setCaptureError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportBusy(false);
+    }
+  }, [session, sessionId]);
 
   if (!loggedIn) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-50 to-white">
-        <div className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 p-8 shadow-lg">
+      <main className="min-h-screen flex items-center justify-center p-6 bg-siem-bg">
+        <div className="w-full max-w-lg siem-card p-8">
           <div className="flex items-center gap-3 mb-6">
-            <span className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
+            <span className="h-10 w-10 rounded-md bg-siem-accent/20 border border-siem-accent/40 text-siem-accentHi flex items-center justify-center font-bold text-sm">
               SPCG
             </span>
             <div>
-              <h1 className="text-xl font-semibold text-slate-900">Packet observability</h1>
-              <p className="text-sm text-slate-500">Kubernetes · NetObserv eBPF</p>
+              <h1 className="text-xl font-semibold text-siem-text">Secure Packet Capture Gateway</h1>
+              <p className="text-sm text-siem-muted">Kubernetes · NetObserv eBPF</p>
             </div>
           </div>
-          <p className="text-slate-600 text-sm mb-4">
-            Connect with kubeconfig or bearer token. Credentials remain in browser memory only.
+          <p className="text-siem-muted text-sm mb-4">
+            Connect with kubeconfig or bearer token. Credentials remain in session memory only and are wiped on sign out.
           </p>
           <div className="flex gap-2 mb-4">
             <button
-              className={`flex-1 py-2 rounded-lg text-sm font-medium ${
-                authMode === "kubeconfig" ? "bg-blue-600 text-white" : "border border-slate-300 text-slate-700"
+              className={`flex-1 py-2 rounded-full text-sm font-semibold transition ${
+                authMode === "kubeconfig"
+                  ? "text-white shadow-[0_8px_20px_rgba(37,99,235,0.35)]"
+                  : "border border-siem-border text-siem-muted"
               }`}
+              style={authMode === "kubeconfig" ? { background: "linear-gradient(180deg, #2d66ff 0%, #1f4ed8 100%)" } : undefined}
               onClick={() => setAuthMode("kubeconfig")}
             >
               Kubeconfig
             </button>
             <button
-              className={`flex-1 py-2 rounded-lg text-sm font-medium ${
-                authMode === "token" ? "bg-blue-600 text-white" : "border border-slate-300 text-slate-700"
+              className={`flex-1 py-2 rounded-full text-sm font-semibold transition ${
+                authMode === "token"
+                  ? "text-white shadow-[0_8px_20px_rgba(37,99,235,0.35)]"
+                  : "border border-siem-border text-siem-muted"
               }`}
+              style={authMode === "token" ? { background: "linear-gradient(180deg, #2d66ff 0%, #1f4ed8 100%)" } : undefined}
               onClick={() => setAuthMode("token")}
             >
               Bearer token
@@ -380,7 +441,7 @@ export default function Home() {
               <input
                 type="file"
                 accept=".yaml,.yml,.config"
-                className="w-full text-sm mb-2 text-slate-600"
+                className="w-full text-sm mb-2 text-siem-muted"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
@@ -390,7 +451,7 @@ export default function Home() {
                 }}
               />
               <textarea
-                className="w-full h-40 rounded-lg border border-slate-300 p-3 font-mono text-xs text-slate-800"
+                className="siem-input h-40 font-mono text-xs"
                 placeholder="Paste kubeconfig YAML"
                 value={kubeconfigText}
                 onChange={(e) => setKubeconfigText(e.target.value)}
@@ -398,17 +459,14 @@ export default function Home() {
             </>
           ) : (
             <textarea
-              className="w-full h-28 rounded-lg border border-slate-300 p-3 font-mono text-sm text-slate-800"
+              className="siem-input h-28 font-mono text-sm"
               placeholder="Bearer token"
               value={token}
               onChange={(e) => setToken(e.target.value.trim())}
             />
           )}
-          {loginError && <p className="mt-3 text-sm text-red-600 whitespace-pre-wrap">{loginError}</p>}
-          <button
-            className="mt-4 w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium"
-            onClick={() => login().catch(() => undefined)}
-          >
+          {loginError && <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>}
+          <button className="mt-4 w-full siem-btn-primary py-2.5" onClick={() => login().catch(() => undefined)}>
             Sign in
           </button>
         </div>
@@ -418,65 +476,82 @@ export default function Home() {
 
   if (!workspaceReady) {
     return (
-      <main className="p-8 max-w-4xl mx-auto min-h-screen bg-slate-50">
-        <h1 className="text-xl font-semibold text-slate-900 mb-2">Namespaces</h1>
-        <p className="text-slate-500 text-sm mb-6">Select namespaces for capture and topology view.</p>
+      <main className="min-h-screen bg-siem-bg p-8 max-w-4xl mx-auto">
+        <h1 className="text-xl font-semibold text-siem-text mb-2">Scope namespaces</h1>
+        <p className="text-siem-muted text-sm mb-6">Tenant boundary — only selected namespaces appear in capture and topology.</p>
         <div className="grid gap-2 mb-6">
           {namespaces.map((n) => (
             <label
               key={n.name}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white border border-slate-200 cursor-pointer hover:border-blue-300"
+              className="flex items-center gap-3 px-4 py-3 rounded-md siem-card cursor-pointer hover:border-siem-accent/40"
             >
               <input type="checkbox" checked={!!selectedNs[n.name]} onChange={() => toggleNs(n.name)} />
-              <span className="font-mono text-slate-800">{n.name}</span>
-              <span className="text-slate-500 text-sm ml-auto">{n.status}</span>
+              <span className="font-mono text-siem-text">{n.name}</span>
+              <span className="text-siem-muted text-sm ml-auto">{n.status}</span>
             </label>
           ))}
         </div>
         <button
-          className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium disabled:opacity-40"
+          className="siem-btn-primary disabled:opacity-40"
           disabled={selectedNamespaces.length === 0}
           onClick={() => enterWorkspace().catch((e) => alert(String(e)))}
         >
-          Continue ({selectedNamespaces.length})
+          Enter workspace ({selectedNamespaces.length})
         </button>
       </main>
     );
   }
 
-  return (
-    <main className="min-h-screen bg-slate-50 p-6 max-w-[1400px] mx-auto space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4 bg-white rounded-2xl border border-slate-200 px-5 py-4 shadow-sm">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Observability workspace</h1>
-          <p className="text-slate-500 text-sm font-mono mt-0.5">
-            {session?.cluster ? `${session.cluster} · ` : ""}
-            {selectedNamespaces.join(", ")}
-          </p>
-          <button className="text-xs text-slate-500 hover:text-slate-800 mt-1" onClick={() => handleLogout()}>
-            Sign out
+  const topbar = (
+    <div className="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h1 className="text-lg font-semibold text-siem-text">Investigation workspace</h1>
+        <p className="text-xs text-siem-muted font-mono mt-0.5">
+          {session?.cluster ? `${session.cluster} · ` : ""}
+          {selectedNamespaces.join(", ")}
+        </p>
+      </div>
+      <div className="flex gap-2">
+        {!capturing ? (
+          <button
+            className="px-4 py-2 rounded-full text-sm font-semibold text-[#062b20] disabled:opacity-40 shadow-[0_10px_22px_rgba(52,211,153,0.28)] transition"
+            style={{ background: "linear-gradient(180deg, #9cf7d0 0%, #68e8b7 100%)" }}
+            onClick={startCapture}
+            disabled={!hasSelection}
+          >
+            Start capture
           </button>
-        </div>
-        <div className="flex gap-2">
-          {!capturing ? (
-            <button
-              className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-40"
-              onClick={startCapture}
-              disabled={!hasSelection}
-            >
-              Start capture
-            </button>
-          ) : (
-            <button className="px-4 py-2 rounded-lg bg-red-600 text-white font-medium" onClick={stopCapture}>
-              Stop capture
-            </button>
-          )}
-        </div>
-      </header>
+        ) : (
+          <button
+            className="px-4 py-2 rounded-full text-sm font-semibold text-[#4a1320] shadow-[0_10px_22px_rgba(251,113,133,0.25)] transition"
+            style={{ background: "linear-gradient(180deg, #ffd5dd 0%, #ffb9c8 100%)" }}
+            onClick={stopCapture}
+          >
+            Stop capture
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <AppShell
+      sidebar={
+        <Sidebar
+          product="SPCG"
+          cluster={session?.cluster}
+          sessionActive={!!session}
+          captureActive={capturing}
+          onSignOut={() => handleLogout()}
+        />
+      }
+      topbar={topbar}
+    >
+      <div className="space-y-6 max-w-[1400px]">
 
       {workloadGroups.map((g) => (
-        <section key={g.namespace} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <div className="px-4 py-2 bg-slate-50 text-sm font-mono text-slate-700 border-b border-slate-100">
+        <section key={g.namespace} className="siem-card overflow-hidden">
+          <div className="px-4 py-2 bg-siem-panel text-sm font-mono text-siem-text border-b border-siem-border">
             Namespace: {g.namespace}
           </div>
 
@@ -499,9 +574,9 @@ export default function Home() {
             onToggle={toggleOwner}
           />
 
-          <div className="px-4 py-2 text-xs text-slate-500 border-t border-slate-100">Pods</div>
+          <div className="px-4 py-2 text-xs text-siem-muted border-t border-siem-border">Pods</div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500">
+            <thead className="bg-siem-panel text-siem-muted">
               <tr>
                 <th className="p-3 w-10" />
                 <th className="p-3 text-left">Pod</th>
@@ -512,12 +587,12 @@ export default function Home() {
             </thead>
             <tbody>
               {g.pods.map((p) => (
-                <tr key={p.uid} className="border-t border-slate-100">
+                <tr key={p.uid} className="border-t border-siem-border hover:bg-siem-panel/50">
                   <td className="p-3">
                     <input type="checkbox" checked={!!selectedPods[p.uid]} onChange={() => togglePod(p.uid)} />
                   </td>
                   <td className="p-3 font-mono">{p.name}</td>
-                  <td className="p-3 text-slate-600">{ownerLabel(p)}</td>
+                  <td className="p-3 text-siem-muted">{ownerLabel(p)}</td>
                   <td className="p-3">
                     <StatusBadge status={p.status} />
                   </td>
@@ -530,7 +605,7 @@ export default function Home() {
       ))}
 
       {capturePods.length > 0 && (
-        <p className="text-xs text-slate-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+        <p className="text-xs text-siem-muted bg-siem-accent/10 border border-siem-accent/30 rounded-md px-3 py-2">
           Watching {capturePods.length} pod(s):{" "}
           {capturePods.map((p) => `${p.namespace}/${p.name}`).join(", ")}
           {capturing ? " · restarts update sensor filters automatically" : ""}
@@ -538,23 +613,23 @@ export default function Home() {
       )}
 
       {captureError && (
-        <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <p className="text-sm text-siem-err bg-siem-err/10 border border-siem-err/30 rounded-md px-3 py-2">
           Capture error: {captureError}
         </p>
       )}
 
       {(capturing || sessionId) && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Live capture</h2>
+          <h2 className="siem-label">Live capture stream</h2>
           {Object.entries(metrics).map(([pod, m]) => (
-            <div key={pod} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <div key={pod} className="siem-card p-4">
               <div className="flex justify-between text-sm mb-2">
-                <span className="font-mono text-slate-800">{pod}</span>
-                <span className="text-slate-500">
+                <span className="font-mono text-siem-text">{pod}</span>
+                <span className="text-siem-muted">
                   {m.packetsPerSec} pkt/s · {m.cumulativeBytes} bytes
                 </span>
               </div>
-              <pre className="font-mono text-xs bg-slate-50 rounded-lg p-3 max-h-32 overflow-auto text-emerald-700 border border-slate-100">
+              <pre className="font-mono text-xs bg-siem-bg rounded-md p-3 max-h-32 overflow-auto text-siem-ok border border-siem-border">
                 {m.lines.join("\n") || "Awaiting sensor packets…"}
               </pre>
             </div>
@@ -564,25 +639,6 @@ export default function Home() {
 
       {sessionId && (
         <>
-          {!capturing && (
-          <div className="flex flex-wrap gap-2 items-center">
-            {selectedPodList.map((p) => (
-              <button
-                key={p.uid}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-white"
-                onClick={() => downloadPod(p.uid)}
-              >
-                PCAP {p.name}
-              </button>
-            ))}
-            <button
-              className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm"
-              onClick={mergePcap}
-            >
-              Merge PCAP
-            </button>
-          </div>
-          )}
           <ObservabilityWorkbench
             topology={topology}
             captureSummary={captureSummary}
@@ -590,7 +646,12 @@ export default function Home() {
             loading={flowsLoading}
             onRefresh={() => loadFlowTopology()}
             onOpenAnalyst={() => setShowAI(true)}
+            onEndSession={() => endCaptureSession()}
             sessionLabel={sessionId}
+            capturePods={exportPodList}
+            exportBusy={exportBusy}
+            onDownloadPod={(p) => handleDownloadPod(p)}
+            onDownloadMerged={() => handleDownloadMerged()}
           />
         </>
       )}
@@ -603,7 +664,8 @@ export default function Home() {
           onClose={() => setShowAI(false)}
         />
       )}
-    </main>
+      </div>
+    </AppShell>
   );
 }
 
@@ -620,8 +682,8 @@ function ControllerTable({
 }) {
   if (rows.length === 0) return null;
   return (
-    <table className="w-full text-sm border-t border-slate-100">
-      <thead className="bg-slate-50 text-slate-500">
+    <table className="w-full text-sm border-t border-siem-border">
+      <thead className="bg-siem-panel text-siem-muted">
         <tr>
           <th className="p-2 w-10" />
           <th className="p-2 text-left">{title}</th>
@@ -633,7 +695,7 @@ function ControllerTable({
         {rows.map((c) => {
           const key = ownerKey(c.namespace, c.kind, c.name);
           return (
-            <tr key={key} className="border-t border-slate-100">
+            <tr key={key} className="border-t border-siem-border hover:bg-siem-panel/50">
               <td className="p-2">
                 <input type="checkbox" checked={!!selectedOwners[key]} onChange={() => onToggle(c)} />
               </td>
@@ -643,7 +705,7 @@ function ControllerTable({
               <td className="p-2">
                 <StatusBadge status={c.status} />
               </td>
-              <td className="p-2 text-slate-500">{c.ready || "—"}</td>
+              <td className="p-2 text-siem-muted">{c.ready || "—"}</td>
             </tr>
           );
         })}
@@ -655,9 +717,9 @@ function ControllerTable({
 function StatusBadge({ status }: { status: string }) {
   const color =
     status === "Running"
-      ? "text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded"
+      ? "text-siem-ok bg-siem-ok/15 border border-siem-ok/30 px-2 py-0.5 rounded"
       : status === "Failed"
-        ? "text-red-700 bg-red-50 px-2 py-0.5 rounded"
-        : "text-amber-700 bg-amber-50 px-2 py-0.5 rounded";
+        ? "text-siem-err bg-siem-err/15 border border-siem-err/30 px-2 py-0.5 rounded"
+        : "text-siem-warn bg-siem-warn/15 border border-siem-warn/30 px-2 py-0.5 rounded";
   return <span className={`text-xs font-medium ${color}`}>{status}</span>;
 }

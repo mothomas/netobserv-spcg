@@ -24,6 +24,19 @@ func (s *Server) registerAIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/ai/triage", s.handleAITriage)
 }
 
+func (s *Server) requireCaptureAccess(w http.ResponseWriter, r *http.Request, captureID string) bool {
+	authSID, err := s.authSessionID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return false
+	}
+	if captureID == "" || !assertCaptureOwner(captureID, authSID) {
+		http.Error(w, "capture session not found or access denied", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 func (s *Server) handleAIVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -57,6 +70,9 @@ func (s *Server) handleAIVerify(w http.ResponseWriter, r *http.Request) {
 	if body.CaptureSessionID == "" {
 		out["capture_error"] = "capture_session_id is required"
 		writeJSON(w, out)
+		return
+	}
+	if !s.requireCaptureAccess(w, r, body.CaptureSessionID) {
 		return
 	}
 	pcapSess, ok := pcap.Get(body.CaptureSessionID)
@@ -135,6 +151,9 @@ func (s *Server) handleAIContext(w http.ResponseWriter, r *http.Request) {
 	if captureID == "" {
 		captureID = body.SessionID
 	}
+	if !s.requireCaptureAccess(w, r, captureID) {
+		return
+	}
 	sess, ok := pcap.Get(captureID)
 	if !ok {
 		http.Error(w, "session not found", http.StatusNotFound)
@@ -196,6 +215,9 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	captureID := body.CaptureSessionID
 	if captureID == "" {
 		captureID = body.SessionID
+	}
+	if captureID != "" && !s.requireCaptureAccess(w, r, captureID) {
+		return
 	}
 
 	if body.Flush {

@@ -180,6 +180,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	sid := strings.TrimSpace(r.Header.Get(auth.HeaderSPCGSession))
 	if sid != "" {
+		purgeCaptureSessions(sid)
 		s.Sessions.Delete(sid)
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -286,6 +287,11 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authSID, err := s.authSessionID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	cs, err := s.userClient(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
@@ -324,6 +330,7 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.SetTrackedPods(tracked)
 	pcap.Store(sess)
+	registerCaptureSession(sess.ID, authSID)
 
 	meta, _ := json.Marshal(map[string]interface{}{
 		"session_id": sess.ID, "resolved_pods": len(resolved.Pods), "sensor_filters": len(resolved.SensorTargets),
@@ -442,37 +449,83 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 }
 
+func (s *Server) authSessionID(r *http.Request) (string, error) {
+	sid, _, _, err := auth.ResolveSessionID(r)
+	if err != nil || sid == "" {
+		return "", fmt.Errorf("missing authentication")
+	}
+	if s.Sessions != nil {
+		if _, ok := s.Sessions.Get(sid); !ok {
+			return "", fmt.Errorf("session expired or invalid: re-authenticate")
+		}
+	}
+	return sid, nil
+}
+
 func (s *Server) handleCaptureDownload(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/capture/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		http.Error(w, "expected .../download/{session} or .../merge/{session}", http.StatusBadRequest)
+		http.Error(w, "expected .../teardown/{session}, .../download/{session}, or .../merge/{session}", http.StatusBadRequest)
 		return
 	}
 	action, sessionID := parts[0], parts[1]
+
+	if action == "teardown" {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		authSID, err := s.authSessionID(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		if !assertCaptureOwner(sessionID, authSID) {
+			http.Error(w, "capture session not found or access denied", http.StatusForbidden)
+			return
+		}
+		teardownCaptureSession(sessionID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	authSID, err := s.authSessionID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if !assertCaptureOwner(sessionID, authSID) {
+		http.Error(w, "capture session not found or access denied", http.StatusForbidden)
+		return
+	}
 	sess, ok := pcap.Get(sessionID)
 	if !ok {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	var data []byte
-	var err error
 	var filename string
+	var exportErr error
 
 	switch action {
 	case "download":
-		podUID := r.URL.Query().Get("pod_uid")
-		data, err = sess.ExportPod(podUID)
-		filename = fmt.Sprintf("%s-%s.pcapng", sess.Namespace, podUID)
+		podUID := strings.TrimSpace(r.URL.Query().Get("pod_uid"))
+		if podUID == "" {
+			http.Error(w, "pod_uid query parameter is required", http.StatusBadRequest)
+			return
+		}
+		data, exportErr = sess.ExportPod(podUID)
+		filename = fmt.Sprintf("%s-%s.pcapng", sess.Namespace, sanitizeFilename(sess.PodExportName(podUID)))
 	case "merge":
-		data, err = sess.ExportMerged()
-		filename = fmt.Sprintf("%s-merged.pcapng", sess.Namespace)
+		data, exportErr = sess.ExportMerged()
+		filename = fmt.Sprintf("%s-merged.pcapng", sanitizeFilename(sess.Namespace))
 	default:
 		http.Error(w, "unknown capture action", http.StatusNotFound)
 		return
 	}
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+	if exportErr != nil {
+		http.Error(w, exportErr.Error(), http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
@@ -560,6 +613,13 @@ func hexPreview(b []byte, max int) string {
 		sb.WriteByte(' ')
 	}
 	return sb.String()
+}
+
+func sanitizeFilename(s string) string {
+	for _, r := range []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"} {
+		s = strings.ReplaceAll(s, r, "_")
+	}
+	return strings.TrimSpace(s)
 }
 
 func trackedPodsFromSession(sess *pcap.Session) []spcgk8s.PodDetail {

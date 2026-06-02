@@ -1,11 +1,34 @@
 import type { FlowTopology, TopologyEdge, TopologyNode } from "@/lib/ai";
-import { iconUrl, inferNodeType, RANK_BY_TYPE, STYLE_BY_TYPE } from "./theme";
+import { inferNodeType, STYLE_BY_TYPE } from "./theme";
 
-export type CyElement = { data: Record<string, string | number | boolean> };
+export type ForceNode = {
+  id: string;
+  label: string;
+  namespace: string;
+  type: string;
+  tracked: boolean;
+  color: string;
+  border: string;
+  textColor: string;
+  size: number;
+};
+
+export type ForceLink = {
+  id: string;
+  source: string;
+  target: string;
+  topologyEdgeId: string;
+  label: string;
+  edgeType: "direct" | "scheduled" | "snat";
+  width: number;
+  curvature: number;
+  distance: number;
+  externalIp?: string;
+};
 
 export type NetworkPlotElements = {
-  nodes: CyElement[];
-  edges: CyElement[];
+  nodes: ForceNode[];
+  links: ForceLink[];
   title: string;
 };
 
@@ -46,30 +69,21 @@ function edgeLabel(e: TopologyEdge): string {
   return parts.join(" · ");
 }
 
-function nodeToCy(n: TopologyNode, trackedIds: Set<string>): CyElement {
+function nodeToForce(n: TopologyNode, trackedIds: Set<string>): ForceNode {
   const ntype = inferNodeType(n.kind, n.label);
   const style = STYLE_BY_TYPE[ntype] ?? STYLE_BY_TYPE.generic;
   const tracked = trackedIds.has(n.id);
-  const lines = [n.label];
-  if (n.host_ip) lines.push(n.host_ip);
-  if (n.owner_kind && n.owner_name) lines.push(`${n.owner_kind}/${n.owner_name}`);
+  const colorSeed = colorFromID(n.id);
   return {
-    data: {
-      id: n.id,
-      label: lines.join("\n"),
-      name: n.label,
-      type: ntype,
-      namespace: n.namespace || "",
-      rank: RANK_BY_TYPE[ntype] ?? 5,
-      iconUrl: iconUrl(ntype),
-      card: style.bg,
-      accent: style.accent,
-      border: style.border,
-      textColor: style.text,
-      directPod: tracked ? "true" : "false",
-      namespaceOnly: tracked ? "false" : "true",
-      tracked: tracked ? "true" : "false",
-    },
+    id: n.id,
+    label: n.label,
+    namespace: n.namespace || "",
+    type: ntype,
+    tracked,
+    color: colorSeed,
+    border: tracked ? "#94b4ff" : style.border,
+    textColor: "#eaf2ff",
+    size: tracked ? 10 : ntype === "external" ? 7 : 8,
   };
 }
 
@@ -81,23 +95,59 @@ export function flowTopologyToNetworkPlot(
   if (!topology) return null;
   const tracked = new Set(trackedIds);
   const isolated = isolateToTrackedPods(topology, tracked);
-  if (!isolated.nodes.length) return { nodes: [], edges: [], title: title || "Observed flows" };
+  if (!isolated.nodes.length) return { nodes: [], links: [], title: title || "Observed flows" };
 
-  const nodes = isolated.nodes.map((n) => nodeToCy(n, tracked));
-  const edges: CyElement[] = isolated.edges.map((e, i) => ({
-    data: {
+  const nodes = isolated.nodes.map((n) => nodeToForce(n, tracked));
+  const pairIndex = new Map<string, number>();
+  const pairCount = new Map<string, number>();
+  for (const e of isolated.edges) {
+    const key = undirectedPair(e.from, e.to);
+    pairCount.set(key, (pairCount.get(key) ?? 0) + 1);
+  }
+  const showDenseLabels = isolated.edges.length <= 42;
+  const links: ForceLink[] = isolated.edges.map((e, i) => {
+    const pairKey = undirectedPair(e.from, e.to);
+    const idx = pairIndex.get(pairKey) ?? 0;
+    pairIndex.set(pairKey, idx + 1);
+    const total = pairCount.get(pairKey) ?? 1;
+    const spread = total > 1 ? (idx - (total - 1) / 2) * 0.16 : 0;
+    const width = Math.max(0.7, Math.min(2.1, Math.log2((e.packets || e.count || 1) + 1) * 0.38));
+    const externalIp = externalPeerIP(e.from, e.to);
+    const distance = externalIp ? 420 : 330;
+    return {
       id: e.id || `e${i}_${e.from}_${e.to}`,
       source: e.from,
       target: e.to,
-      label: edgeLabel(e),
-      edgeType: edgeType(e.health),
+      label: showDenseLabels ? edgeLabel(e) : "",
+      edgeType: edgeType(e.health) as ForceLink["edgeType"],
       topologyEdgeId: e.id,
-    },
-  }));
+      curvature: spread,
+      width,
+      distance,
+      externalIp: externalIp || "",
+    };
+  });
 
   return {
     nodes,
-    edges,
+    links,
     title: title || `Capture · ${trackedIds.length} selected pod(s)`,
   };
+}
+
+function undirectedPair(a: string, b: string): string {
+  return a < b ? `${a}::${b}` : `${b}::${a}`;
+}
+
+function externalPeerIP(from: string, to: string): string | null {
+  const a = from.startsWith("ext/") ? from.slice(4) : "";
+  const b = to.startsWith("ext/") ? to.slice(4) : "";
+  return a || b || null;
+}
+
+function colorFromID(id: string): string {
+  let h = 0;
+  for (const ch of id) h = (h * 37 + ch.charCodeAt(0)) | 0;
+  const hue = Math.abs(h) % 360;
+  return `hsl(${hue} 65% 58%)`;
 }

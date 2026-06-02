@@ -100,6 +100,29 @@ export type CaptureSummary = {
   top_talkers?: { id: string; label: string; kind?: string; packets: number; bytes: number }[];
   drop_edges?: number;
   dns_queries?: number;
+  packet_analytics?: PacketAnalytics;
+};
+
+export type TimeBucket = {
+  offset_ms: number;
+  packets: number;
+  bytes: number;
+};
+
+export type PacketAnalytics = {
+  tcp_syn?: number;
+  tcp_syn_ack?: number;
+  tcp_rst?: number;
+  tcp_fin?: number;
+  tcp_failed_handshakes?: number;
+  icmp?: Record<string, number>;
+  peer_classes?: Record<string, number>;
+  tls_sni?: { host: string; count: number }[];
+  dns_failures?: Record<string, number>;
+  dns_responses?: number;
+  time_buckets?: TimeBucket[];
+  peak_bucket_packets?: number;
+  peak_bucket_bits_per_sec?: number;
 };
 
 export type AIContextResponse = {

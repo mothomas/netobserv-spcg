@@ -29,10 +29,10 @@ type Status = "unknown" | "ok" | "fail" | "checking";
 
 function StatusPill({ label, status, detail }: { label: string; status: Status; detail?: string }) {
   const colors: Record<Status, string> = {
-    unknown: "bg-slate-100 text-slate-600 border-slate-200",
-    ok: "bg-emerald-50 text-emerald-800 border-emerald-200",
-    fail: "bg-red-50 text-red-800 border-red-200",
-    checking: "bg-blue-50 text-blue-700 border-blue-200 animate-pulse",
+    unknown: "bg-siem-bg text-siem-muted border-siem-border",
+    ok: "bg-siem-ok/15 text-siem-ok border-siem-ok/30",
+    fail: "bg-siem-err/15 text-siem-err border-siem-err/30",
+    checking: "bg-siem-accent/15 text-siem-accentHi border-siem-accent/30 animate-pulse",
   };
   return (
     <div className={`flex flex-col gap-0.5 px-3 py-2 rounded-lg border min-w-[120px] ${colors[status]}`}>
@@ -192,17 +192,17 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-white text-slate-900">
-      <header className="shrink-0 px-6 py-4 border-b border-slate-200 bg-slate-50">
+    <div className="fixed inset-0 z-50 flex flex-col bg-siem-bg text-siem-text">
+      <header className="shrink-0 px-6 py-4 border-b border-siem-border bg-siem-panel">
         <div className="flex items-start justify-between gap-4 max-w-[1600px] mx-auto w-full">
           <div>
             <div className="flex items-center gap-3">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white text-sm font-bold">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-siem-accent text-white text-sm font-bold">
                 AI
               </span>
               <div>
                 <h1 className="text-lg font-semibold tracking-tight">Network analyst — full view</h1>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-siem-muted">
                   Scrubbed JSONL only · credentials in session memory · capture {sessionId.slice(0, 12)}…
                 </p>
               </div>
@@ -229,7 +229,7 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
               />
               <button
                 type="button"
-                className="ml-auto px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium hover:bg-white"
+                className="ml-auto siem-btn-ghost"
                 onClick={() => runVerify().catch(() => undefined)}
               >
                 Verify connection
@@ -238,22 +238,22 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
           </div>
           <button
             type="button"
-            className="shrink-0 px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-white"
+            className="shrink-0 siem-btn-ghost"
             onClick={onClose}
           >
             Close
           </button>
         </div>
 
-        <nav className="flex gap-1 mt-4 max-w-[1600px] mx-auto w-full border-b border-slate-200 -mb-px">
+        <nav className="flex gap-1 mt-4 max-w-[1600px] mx-auto w-full border-b border-siem-border -mb-px">
           {tabs.map((t) => (
             <button
               key={t.id}
               type="button"
               className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
                 tab === t.id
-                  ? "border-blue-600 text-blue-700"
-                  : "border-transparent text-slate-500 hover:text-slate-800"
+                  ? "border-siem-accent text-siem-accentHi"
+                  : "border-transparent text-siem-muted hover:text-siem-text"
               }`}
               onClick={() => setTab(t.id)}
             >
@@ -263,11 +263,12 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
         </nav>
       </header>
 
-      <div className="flex-1 overflow-auto min-h-0 bg-slate-50/50">
+      <div className="flex-1 overflow-auto min-h-0 bg-siem-bg">
         <div className="max-w-[1600px] mx-auto w-full h-full p-4">
           {tab === "observe" && (
             <ObservabilityWorkbench
               topology={topology}
+              captureSummary={ctx?.capture_summary ?? null}
               trackedPodIds={trackedPodIds}
               loading={loading}
               onRefresh={() => loadContext()}
@@ -276,30 +277,30 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
           )}
 
           {tab === "chat" && (
-            <div className="flex flex-col h-[min(70vh,720px)] rounded-2xl border border-slate-200 bg-white overflow-hidden">
+            <div className="flex flex-col h-[min(70vh,720px)] siem-card overflow-hidden">
               <div className="flex-1 overflow-auto p-6 space-y-4">
                 {chat.length === 0 && (
-                  <p className="text-sm text-slate-500 text-center py-12">
+                  <p className="text-sm text-siem-muted text-center py-12">
                     Configure connection, verify capture, then ask about drops, DNS, or pod paths.
                   </p>
                 )}
                 {chat.map((m, i) => (
                   <div
                     key={i}
-                    className={`max-w-[85%] rounded-xl px-4 py-3 text-sm ${
+                    className={`max-w-[85%] rounded-md px-4 py-3 text-sm ${
                       m.role === "user"
-                        ? "ml-auto bg-blue-50 border border-blue-100"
-                        : "bg-slate-50 border border-slate-200"
+                        ? "ml-auto bg-siem-accent/15 border border-siem-accent/30"
+                        : "bg-siem-panel border border-siem-border"
                     }`}
                   >
-                    <div className="text-[10px] uppercase text-slate-500 mb-1">{m.role}</div>
-                    <div className="whitespace-pre-wrap text-slate-800">{m.content}</div>
+                    <div className="siem-label mb-1">{m.role}</div>
+                    <div className="whitespace-pre-wrap text-siem-text">{m.content}</div>
                   </div>
                 ))}
               </div>
-              <div className="p-4 border-t border-slate-100 flex gap-3 bg-slate-50">
+              <div className="p-4 border-t border-siem-border flex gap-3 bg-siem-panel">
                 <input
-                  className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  className="flex-1 siem-input"
                   placeholder="Ask about this capture…"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -307,7 +308,7 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
                 />
                 <button
                   type="button"
-                  className="px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-40"
+                  className="siem-btn-primary disabled:opacity-40"
                   disabled={loading || !apiKey || captureStatus === "fail"}
                   onClick={() => sendMessage()}
                 >
@@ -318,7 +319,7 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
           )}
 
           {tab === "data" && (
-            <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+            <div className="space-y-4 siem-card p-6">
               <div className="grid grid-cols-3 gap-3">
                 <MetricCard label="Events" value={String(ctx?.event_count ?? 0)} />
                 <MetricCard label="JSONL lines" value={String(ctx?.jsonl_lines ?? 0)} />
@@ -331,19 +332,19 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
                   }
                 />
               </div>
-              <pre className="text-xs font-mono border border-slate-200 rounded-xl p-4 overflow-auto max-h-[60vh] text-slate-700 bg-slate-50">
+              <pre className="text-xs font-mono border border-siem-border rounded-md p-4 overflow-auto max-h-[60vh] text-siem-muted bg-siem-bg">
                 {ctx?.jsonl_preview || "Reload context to load scrubbed JSONL."}
               </pre>
             </div>
           )}
 
           {tab === "settings" && (
-            <div className="grid md:grid-cols-2 gap-6 rounded-2xl border border-slate-200 bg-white p-6">
+            <div className="grid md:grid-cols-2 gap-6 siem-card p-6">
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold">LLM provider</h3>
+                <h3 className="text-sm font-semibold text-siem-text">LLM provider</h3>
                 <Field label="Provider">
                   <select
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    className="siem-input"
                     value={provider}
                     onChange={(e) => onProviderChange(e.target.value as AIProvider)}
                   >
@@ -356,14 +357,14 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
                 </Field>
                 <Field label="Model">
                   <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+                    className="siem-input font-mono"
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
                   />
                 </Field>
                 <Field label="API endpoint">
                   <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-mono"
+                    className="siem-input text-xs font-mono"
                     value={endpoint}
                     onChange={(e) => setEndpoint(e.target.value)}
                   />
@@ -371,7 +372,7 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
                 <Field label="API key (session only)">
                   <input
                     type="password"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    className="siem-input"
                     value={apiKey}
                     onChange={(e) => {
                       setApiKey(e.target.value);
@@ -381,14 +382,14 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
                 </Field>
                 <Field label="HTTP proxy">
                   <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    className="siem-input"
                     placeholder="http://proxy:8080"
                     value={proxy}
                     onChange={(e) => setProxy(e.target.value)}
                   />
                 </Field>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <div className="siem-panel p-4 space-y-3">
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
@@ -399,12 +400,12 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
                 </label>
                 <button
                   type="button"
-                  className="w-full py-2.5 rounded-lg bg-blue-600 text-white font-semibold text-sm"
+                  className="w-full siem-btn-primary"
                   onClick={() => runVerify().catch(() => undefined)}
                 >
                   Verify session & connection
                 </button>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-siem-muted">
                   Cursor uses the Cloud Agents API (no-repo) with your key from Dashboard → Integrations.
                   Azure / Copilot: use OpenAI-compatible with your gateway URL.
                 </p>
@@ -415,17 +416,17 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
       </div>
 
       {error && (
-        <div className="shrink-0 mx-6 mb-2 px-4 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800 max-w-[1600px] w-full self-center">
+        <div className="shrink-0 mx-6 mb-2 px-4 py-2 rounded-md bg-siem-err/10 border border-siem-err/30 text-sm text-siem-err max-w-[1600px] w-full self-center">
           {error}
         </div>
       )}
 
-      <footer className="shrink-0 flex justify-between items-center px-6 py-3 border-t border-slate-200 bg-white text-xs text-slate-500">
+      <footer className="shrink-0 flex justify-between items-center px-6 py-3 border-t border-siem-border bg-siem-panel text-xs text-siem-muted">
         <span>Zero retention · wiped on flush or sign-out</span>
         <div className="flex gap-2">
           <button
             type="button"
-            className="px-4 py-2 rounded-lg border border-slate-300 text-sm"
+            className="siem-btn-ghost"
             onClick={() => loadContext()}
             disabled={loading}
           >
@@ -433,7 +434,7 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
           </button>
           <button
             type="button"
-            className="px-4 py-2 rounded-lg border border-red-300 text-red-700 text-sm"
+            className="siem-btn-ghost text-siem-err border-siem-err/40"
             onClick={() => flush()}
           >
             Flush & close
@@ -447,7 +448,7 @@ export function AIDiagnosticModal({ open, sessionId, authSessionId, onClose }: P
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{label}</span>
+      <span className="siem-label">{label}</span>
       <div className="mt-1">{children}</div>
     </label>
   );
@@ -455,9 +456,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 px-4 py-3">
-      <div className="text-[10px] uppercase text-slate-500">{label}</div>
-      <div className="text-lg font-semibold text-slate-900">{value}</div>
+    <div className="siem-card px-4 py-3">
+      <div className="siem-label">{label}</div>
+      <div className="text-lg font-semibold text-siem-text">{value}</div>
     </div>
   );
 }

@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
 body {
-  @apply bg-spcg-bg text-slate-900 antialiased;
+  @apply bg-siem-bg text-siem-text antialiased font-sans;
+}
+
+@layer components {
+  .siem-card {
+    @apply bg-siem-card/85 backdrop-blur-[2px] border border-white/5 rounded-lg shadow-panel;
+  }
+  .siem-panel {
+    @apply bg-siem-panel/85 backdrop-blur-[2px] border border-white/5 rounded-lg;
+  }
+  .siem-input {
+    @apply w-full rounded-md border border-siem-border bg-siem-bg px-3 py-2 text-sm text-siem-text placeholder:text-siem-muted focus:border-siem-accent focus:outline-none focus:ring-1 focus:ring-siem-accent;
+  }
+  .siem-btn-primary {
+    @apply px-4 py-2 rounded-full text-white text-sm font-semibold transition shadow-[0_10px_24px_rgba(37,99,235,0.38)];
+    background: linear-gradient(180deg, #2d66ff 0%, #1f4ed8 100%);
+  }
+  .siem-btn-ghost {
+    @apply px-3 py-1.5 rounded-md border border-siem-border text-siem-text text-sm hover:bg-siem-panel transition;
+  }
+  .siem-label {
+    @apply text-[11px] font-medium uppercase tracking-wider text-siem-muted;
+  }
 }

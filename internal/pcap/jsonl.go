@@ -52,10 +52,21 @@ func eventToRecord(ev FlowEvent) JSONLRecord {
 		Frame:      summarizeFrame(ev.Frame),
 	}
 	if len(ev.FlowMeta) > 0 {
-		rec.Flow = ev.FlowMeta
-		rec.K8s = k8sView(ev.FlowMeta)
+		rec.Flow = cloneFlowMeta(ev.FlowMeta)
+		rec.K8s = k8sView(rec.Flow)
 	}
 	return rec
+}
+
+func cloneFlowMeta(src map[string]interface{}) map[string]interface{} {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 func scrubRecord(s *ai.Scrubber, rec *JSONLRecord) {

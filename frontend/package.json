@@ -11,12 +11,15 @@
   "dependencies": {
     "cytoscape": "^3.33.4",
     "cytoscape-dagre": "^3.0.0",
+    "d3-force": "^3.0.0",
     "next": "14.2.18",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-force-graph-2d": "^1.29.1"
   },
   "devDependencies": {
     "@types/cytoscape": "^3.21.9",
+    "@types/d3-force": "^3.0.10",
     "@types/node": "^20.17.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

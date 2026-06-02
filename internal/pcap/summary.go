@@ -27,6 +27,7 @@ type CaptureSummary struct {
 	TopTalkers         []TalkerStat       `json:"top_talkers"`
 	DropEdges          int                `json:"drop_edges"`
 	DnsQueries         int                `json:"dns_queries"`
+	PacketAnalytics    PacketAnalytics    `json:"packet_analytics"`
 }
 
 type TalkerStat struct {
@@ -187,6 +188,7 @@ func BuildCaptureSummary(events []FlowEvent, tracked []TrackedPod) CaptureSummar
 	sum.TopPorts = topPorts(portCounts, 8)
 	sum.TopDNS = topDNS(dnsCounts, 6)
 	sum.TopTalkers = topTalkers(talkerBytes, talkerPkts, talkerLabel, talkerKind, 8)
+	sum.PacketAnalytics = AnalyzeEvents(events)
 
 	return sum
 }

@@ -121,7 +121,7 @@ func BuildFlowTopology(events []FlowEvent, tracked []TrackedPod) FlowTopology {
 			e.DstPort = fs.DstPort
 		}
 
-		bytes, packets := flowCounters(ev.FlowMeta)
+		bytes, packets := flowCounters(ev.FlowMeta, ev.Frame)
 		e.Bytes += bytes
 		e.Packets += packets
 
@@ -383,7 +383,7 @@ func flowUint(m map[string]interface{}, k string) uint64 {
 	return uint64(n)
 }
 
-func flowCounters(m map[string]interface{}) (bytes, packets uint64) {
+func flowCounters(m map[string]interface{}, frame []byte) (bytes, packets uint64) {
 	b := flowInt64(m, "Bytes")
 	p := flowInt64(m, "Packets")
 	if b > 0 {
@@ -391,6 +391,15 @@ func flowCounters(m map[string]interface{}) (bytes, packets uint64) {
 	}
 	if p > 0 {
 		packets = uint64(p)
+	}
+	if packets == 0 {
+		packets = 1
+	}
+	if bytes == 0 {
+		raw := ethernetPayload(frame)
+		if len(raw) > 0 {
+			bytes = uint64(len(raw))
+		}
 	}
 	return
 }

@@ -94,6 +94,59 @@ export async function logout(sessionId: string): Promise<void> {
   });
 }
 
+/** Wipes capture PCAP/AI state; auth session remains until logout. */
+export async function teardownCapture(authSessionId: string, captureSessionId: string): Promise<void> {
+  const res = await fetch(`/api/v1/capture/teardown/${captureSessionId}`, {
+    method: "POST",
+    headers: authHeaders(authSessionId),
+  });
+  if (!res.ok && res.status !== 204) throw new Error(await res.text());
+}
+
+function parseDownloadFilename(contentDisposition: string | null, fallback: string): string {
+  if (!contentDisposition) return fallback;
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
+  if (star) return decodeURIComponent(star[1]);
+  const plain = /filename="?([^";]+)"?/i.exec(contentDisposition);
+  return plain ? plain[1] : fallback;
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Download PCAP for one captured pod (requires auth session header). */
+export async function downloadCapturePod(
+  authSessionId: string,
+  captureSessionId: string,
+  podUid: string,
+  podName?: string
+): Promise<void> {
+  const res = await fetch(
+    `/api/v1/capture/download/${encodeURIComponent(captureSessionId)}?pod_uid=${encodeURIComponent(podUid)}`,
+    { headers: { "X-SPCG-Session": authSessionId } }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const blob = await res.blob();
+  const fallback = podName ? `${podName}.pcapng` : `${podUid}.pcapng`;
+  triggerBlobDownload(blob, parseDownloadFilename(res.headers.get("Content-Disposition"), fallback));
+}
+
+/** Download merged PCAP for all pods in the capture session. */
+export async function downloadCaptureMerged(authSessionId: string, captureSessionId: string): Promise<void> {
+  const res = await fetch(`/api/v1/capture/merge/${encodeURIComponent(captureSessionId)}`, {
+    headers: { "X-SPCG-Session": authSessionId },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const blob = await res.blob();
+  triggerBlobDownload(blob, parseDownloadFilename(res.headers.get("Content-Disposition"), "merged.pcapng"));
+}
+
 export async function fetchNamespaces(sessionId: string): Promise<NamespaceRow[]> {
   const res = await fetch("/api/v1/namespaces", { headers: authHeaders(sessionId) });
   if (!res.ok) throw new Error(await res.text());
