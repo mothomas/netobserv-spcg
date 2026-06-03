@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: continuous-network-scanner
+  namespace: random-scanner
+  labels:
+    app: internet-scanner
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: internet-scanner
+  template:
+    metadata:
+      labels:
+        app: internet-scanner
+        spcg.lab/threat-sim: "true"
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node.cilium.io/agent-not-ready
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: zmap-container
+          image: ilyaglow/zmap:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              IFACE="$(ip -o route show default 2>/dev/null | awk '{print $5; exit}')"
+              GW="$(ip -o route show default 2>/dev/null | awk '{print $3; exit}')"
+              GWMAC="$(ip neigh show "${GW}" dev "${IFACE}" 2>/dev/null | sed -n 's/.*lladdr \([^ ]*\).*/\1/p' | head -1)"
+              SRC="${NODE_IP:-$(hostname -i | awk '{print $1}')}"
+              while true; do
+                if [ -n "${GWMAC}" ]; then
+                  zmap -p 443 -w /config/targets.txt -B 1M -i "${IFACE}" -S "${SRC}" -G "${GWMAC}" -o /dev/stdout || true
+                else
+                  zmap -p 443 -w /config/targets.txt -B 1M -i "${IFACE}" -S "${SRC}" -o /dev/stdout || true
+                fi
+                sleep 10
+              done
+          env:
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_RAW", "NET_ADMIN"]
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: target-volume
+              mountPath: /config
+      volumes:
+        - name: target-volume
+          configMap:
+            name: scanner-target-config

@@ -9,6 +9,6 @@
 | [kubernetes-vs-openshift.md](./kubernetes-vs-openshift.md) | Quick platform compare | Auth, NodePort vs Route, PSS |
 | [neo4j-graph.md](./neo4j-graph.md) | Graph / multi-tenant | Neo4j pipeline, tenant crypto, query isolation |
 | [ci-cd.md](./ci-cd.md) | Release engineering | Image build and registry |
-| [lab-random-scanner.md](./lab-random-scanner.md) | Lab only | Threat-sim branch (not on `main`) |
+| [lab-random-scanner.md](./lab-random-scanner.md) | Lab only | Local threat-sim (gitignored; reference in `examples/`) |
 
 Start with **ARCHITECTURE.md** and **DEPLOYMENT.md** for a full picture.

@@ -1,0 +1,9 @@
+# Lab-only isolated threat simulation for SPCG capture testing.
+# Do NOT apply to production clusters or scan unauthorized networks.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: random-scanner
+resources:
+  - namespace.yaml
+  - scanner-target-config.yaml
+  - deployment.yaml

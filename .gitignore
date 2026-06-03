@@ -11,6 +11,6 @@ kubeconfig.*
 *.kubeconfig
 admin.conf
 
-# Lab-only threat sim (branch lab/random-scanner — never commit on main)
+# Local lab threat-sim only (reference: docs/examples/lab-random-scanner/)
 manifests/lab/
 scripts/lab/

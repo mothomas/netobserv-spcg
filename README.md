@@ -14,7 +14,7 @@ Namespace-scoped, zero-trust packet capture platform wrapping [netobserv-cli](ht
 | [docs/kubernetes-vs-openshift.md](docs/kubernetes-vs-openshift.md) | Platform quick compare |
 | [docs/neo4j-graph.md](docs/neo4j-graph.md) | Graph store and tenant crypto |
 | [docs/ci-cd.md](docs/ci-cd.md) | Image build and registry |
-| [docs/lab-random-scanner.md](docs/lab-random-scanner.md) | Lab threat-sim (branch `lab/random-scanner` only) |
+| [docs/lab-random-scanner.md](docs/lab-random-scanner.md) | Lab threat-sim (local test; gitignored) |
 
 ## Namespace layout
 

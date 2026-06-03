@@ -1,48 +1,35 @@
-# Lab random-scanner (local branch)
+# Lab random-scanner (local test only)
 
-The zmap threat-simulation manifests are **not** part of the product tree on `main`. They live on a dedicated local branch so they never ship upstream.
+Zmap threat-simulation for SPCG capture testing in **authorized lab clusters only**.
 
-## Cluster
+## What is in git
 
-The `random-scanner` namespace has been removed from the lab cluster. Nothing runs until you explicitly start it.
+| Path | Tracked |
+|------|---------|
+| All product code (`cmd/`, `internal/`, `frontend/`, `manifests/base`, overlays, `openshift/`, etc.) | **Yes** on `main` |
+| Reference copy | `docs/examples/lab-random-scanner/` |
+| Live lab deploy tree | `manifests/lab/`, `scripts/lab/` — **gitignored** |
 
-## Use the lab branch
+## One-time local setup
 
 ```bash
-git fetch origin   # optional
-git checkout lab/random-scanner
+./docs/examples/lab-random-scanner/setup-local.sh
+```
+
+Copies reference YAML and scripts into gitignored paths so you can run the scanner without committing lab config.
+
+## Run / stop
+
+```bash
 export KUBECONFIG="$PWD/kubeconfig"
 ./scripts/lab/random-scanner-start.sh
-```
-
-Stop without deleting config:
-
-```bash
 ./scripts/lab/random-scanner-stop.sh
-```
-
-Full cleanup:
-
-```bash
 ./scripts/lab/random-scanner-teardown.sh
 ```
 
-Return to product work:
+Default deployment scale is **0**; start script scales to 1.
 
-```bash
-git checkout main
-```
+## Safety
 
-## Upstream policy
-
-- `manifests/lab/` and `scripts/lab/` are **gitignored on `main`**.
-- Do **not** merge `lab/random-scanner` into `main`.
-- Do **not** push `lab/random-scanner` to shared/upstream remotes (keep the branch local).
-
-To block accidental pushes of the lab branch:
-
-```bash
-git config branch.lab/random-scanner.pushRemote no_push
-```
-
-Create the `no_push` remote only as a dummy if you use the config above, or simply never `git push` that branch.
+- Lab use only; do not scan networks you are not authorized to probe.
+- Do not merge lab manifests into product overlays (`small`, `openshift-small`, etc.).
