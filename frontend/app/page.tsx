@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AIDiagnosticModal } from "@/components/AIDiagnosticModal";
 import { ObservabilityWorkbench } from "@/components/ObservabilityWorkbench";
+import { S3CapturePanel, type CaptureTierLimits } from "@/components/S3CapturePanel";
 import { AppShell } from "@/components/layout/AppShell";
-import { Sidebar } from "@/components/layout/Sidebar";
-import { fetchAIContext, type CaptureSummary, type FlowTopology } from "@/lib/ai";
-import { emptyTopology } from "@/lib/topology";
+import { Sidebar, type AppSection } from "@/components/layout/Sidebar";
+import { type CaptureSummary, type FlowTopology } from "@/lib/ai";
+import { emptyTopology, normalizeTopology } from "@/lib/topology";
+import { fetchGraphTopology, normalizeSigmaGraph, type SigmaGraph } from "@/lib/graph";
 import {
   fetchNamespaces,
   fetchWorkloads,
+  fetchCaptureObservability,
   ownerKey,
   ownerLabel,
   podUnderOwner,
@@ -24,8 +27,14 @@ import {
   teardownCapture,
   downloadCapturePod,
   downloadCaptureMerged,
+  fetchCaptureLimits,
+  releaseAllCaptureStreams,
+  releaseCaptureStream,
+  openS3Export,
   type AuthMode,
   type LoginResponse,
+  type S3CaptureConfig,
+  type S3ExportInfo,
   authHeaders,
 } from "@/lib/api";
 
@@ -61,9 +70,15 @@ export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<Record<string, PodMetrics>>({});
   const [showAI, setShowAI] = useState(false);
+  const [activeSection, setActiveSection] = useState<AppSection>("workspace");
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const flowGraphRef = useRef<HTMLDivElement>(null);
   const [topology, setTopology] = useState<FlowTopology | null>(null);
+  const [sigmaGraph, setSigmaGraph] = useState<SigmaGraph | null>(null);
   const [captureSummary, setCaptureSummary] = useState<CaptureSummary | null>(null);
   const [flowsLoading, setFlowsLoading] = useState(false);
+  const [graphDegraded, setGraphDegraded] = useState(false);
+  const flowsInFlightRef = useRef(false);
   const [capturePods, setCapturePods] = useState<{ name: string; namespace: string; uid?: string }[]>([]);
   const [trackedPodIds, setTrackedPodIds] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -71,6 +86,36 @@ export default function Home() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
+  const [s3Config, setS3Config] = useState<S3CaptureConfig>({
+    enabled: false,
+    bucket: "",
+    prefix: "",
+    access_key_id: "",
+    secret_access_key: "",
+    endpoint: "",
+    region: "",
+    session_token: "",
+    force_path_style: false,
+  });
+  const [s3Tested, setS3Tested] = useState(false);
+  const [s3Export, setS3Export] = useState<S3ExportInfo | null>(null);
+  const [tierLimits, setTierLimits] = useState<CaptureTierLimits | null>(null);
+
+  const navigateSection = useCallback(
+    (section: AppSection) => {
+      setActiveSection(section);
+      if (section === "ai") {
+        if (sessionId) setShowAI(true);
+        return;
+      }
+      setShowAI(false);
+      const target = section === "flow" ? flowGraphRef : workspaceRef;
+      requestAnimationFrame(() => {
+        target.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    },
+    [sessionId]
+  );
 
   const login = useCallback(async () => {
     setLoginError(null);
@@ -98,6 +143,7 @@ export default function Home() {
     setMetrics({});
     setCapturePods([]);
     setCaptureError(null);
+    setS3Export(null);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -142,7 +188,39 @@ export default function Home() {
     setWorkspaceReady(true);
     setSelectedPods({});
     setSelectedOwners({});
+    fetchCaptureLimits(session.session_id)
+      .then((r) =>
+        setTierLimits({
+          ...r.limits,
+          active_streams: r.active_capture_count,
+        })
+      )
+      .catch(() => setTierLimits(null));
   }, [session, selectedNamespaces]);
+
+  const refreshTierLimits = useCallback(async () => {
+    if (!session?.session_id) return;
+    try {
+      const r = await fetchCaptureLimits(session.session_id);
+      setTierLimits({ ...r.limits, active_streams: r.active_capture_count });
+    } catch {
+      /* ignore */
+    }
+  }, [session?.session_id]);
+
+  const handleReleaseAllStreams = useCallback(async () => {
+    if (!session?.session_id) return;
+    setCaptureError(null);
+    try {
+      const n = await releaseAllCaptureStreams(session.session_id);
+      await refreshTierLimits();
+      if (n > 0) {
+        setCaptureError(null);
+      }
+    } catch (e) {
+      setCaptureError(e instanceof Error ? e.message : String(e));
+    }
+  }, [session, refreshTierLimits]);
 
   const toggleNs = (name: string) => {
     setSelectedNs((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -220,15 +298,26 @@ export default function Home() {
 
   const hasSelection = captureSelections.length > 0;
 
+  const s3Active = s3Config.enabled || !!tierLimits?.s3_offload_required;
+
   const startCapture = async () => {
     if (!hasSelection || !session) return;
+    if (s3Active && !s3Tested) {
+      setCaptureError("Test S3 connection before starting capture");
+      return;
+    }
     setCaptureError(null);
     setCapturing(true);
+    setS3Export(s3Active ? { enabled: true, upload_done: false, bucket: s3Config.bucket } : null);
     setMetrics({});
     const pods = selectedPodList.map((p) => ({ namespace: p.namespace, name: p.name, uid: p.uid }));
     setCapturePods(pods);
     setTrackedPodIds(selectionPodIds);
+    const prevCap = sessionId;
     abortRef.current?.abort();
+    if (prevCap) {
+      await releaseCaptureStream(session.session_id, prevCap).catch(() => undefined);
+    }
     abortRef.current = new AbortController();
 
     let res: Response;
@@ -239,6 +328,7 @@ export default function Home() {
         body: JSON.stringify({
           namespaces: selectedNamespaces,
           selections: captureSelections,
+          s3: s3Active ? { ...s3Config, enabled: true } : { enabled: false },
         }),
         signal: abortRef.current.signal,
       });
@@ -254,6 +344,7 @@ export default function Home() {
       const errText = await res.text().catch(() => res.statusText);
       setCaptureError(errText || `Capture failed (${res.status})`);
       setCapturing(false);
+      await refreshTierLimits();
       return;
     }
 
@@ -281,12 +372,26 @@ export default function Home() {
         if (eventLine?.includes("error")) {
           setCaptureError(data);
         }
+        if (eventLine?.includes("limit")) {
+          setCaptureError(data);
+          setCapturing(false);
+        }
         if (eventLine?.includes("session")) {
           try {
             const meta = JSON.parse(data);
             setSessionId(meta.session_id || data.trim());
+            if (meta.s3_enabled) {
+              setS3Export((prev) => ({ enabled: true, upload_done: false, bucket: s3Config.bucket, ...prev }));
+            }
           } catch {
             setSessionId(data.trim());
+          }
+        }
+        if (eventLine?.includes("s3_finalized")) {
+          try {
+            setS3Export(JSON.parse(data) as S3ExportInfo);
+          } catch {
+            /* ignore */
           }
         }
         if (eventLine?.includes("pod_refresh")) {
@@ -323,40 +428,62 @@ export default function Home() {
       }
     }
     setCapturing(false);
+    await refreshTierLimits();
   };
 
-  const stopCapture = () => {
+  const stopCapture = async () => {
+    const cap = sessionId;
     abortRef.current?.abort();
     setCapturing(false);
+    if (session?.session_id && cap) {
+      await releaseCaptureStream(session.session_id, cap).catch(() => undefined);
+    }
+    await refreshTierLimits();
   };
 
   const loadFlowTopology = useCallback(async () => {
-    if (!session?.session_id || !sessionId) return;
+    if (!session?.session_id || !sessionId || flowsInFlightRef.current) return;
+    flowsInFlightRef.current = true;
     setFlowsLoading(true);
     try {
-      const ctx = await fetchAIContext(session.session_id, sessionId, 400);
-      setTopology(ctx.topology ?? emptyTopology());
-      setCaptureSummary(ctx.capture_summary ?? null);
-      setTrackedPodIds(ctx.tracked_pod_ids?.length ? ctx.tracked_pod_ids : selectionPodIds);
+      const obs = await fetchCaptureObservability(session.session_id, sessionId);
+      setTopology(normalizeTopology(obs.topology));
+      setCaptureSummary(obs.capture_summary ?? null);
+      setGraphDegraded(!!(obs.graph_capped || obs.events_sampled));
+      if (obs.s3_export) setS3Export(obs.s3_export);
+      setTrackedPodIds(obs.tracked_pod_ids?.length ? obs.tracked_pod_ids : selectionPodIds);
+      try {
+        const g = await fetchGraphTopology(session.session_id, sessionId);
+        setSigmaGraph(normalizeSigmaGraph(g));
+      } catch {
+        /* keep stats/topology from observability; graph may retry next tick */
+      }
     } catch {
       setTopology(emptyTopology());
       setCaptureSummary(null);
     } finally {
+      flowsInFlightRef.current = false;
       setFlowsLoading(false);
     }
   }, [session, sessionId, selectionPodIds]);
 
   useEffect(() => {
-    if (sessionId && !capturing && session?.session_id) {
+    if (sessionId && session?.session_id) {
       loadFlowTopology();
     }
-  }, [sessionId, capturing, session?.session_id, loadFlowTopology]);
+  }, [sessionId, session?.session_id, loadFlowTopology]);
 
   useEffect(() => {
     if (!sessionId || !capturing || !session?.session_id) return;
-    const id = window.setInterval(() => loadFlowTopology(), 4000);
+    const id = window.setInterval(() => loadFlowTopology(), 8000);
     return () => window.clearInterval(id);
   }, [sessionId, capturing, session?.session_id, loadFlowTopology]);
+
+  useEffect(() => {
+    if (!workspaceReady || !session?.session_id) return;
+    const id = window.setInterval(() => refreshTierLimits(), 5000);
+    return () => window.clearInterval(id);
+  }, [workspaceReady, session?.session_id, refreshTierLimits]);
 
   const exportPodList = useMemo((): { uid: string; name: string; namespace: string }[] => {
     if (capturePods.length > 0) {
@@ -383,6 +510,21 @@ export default function Home() {
     [session, sessionId]
   );
 
+  const handleOpenS3 = useCallback(async () => {
+    if (!session?.session_id || !sessionId) return;
+    setExportBusy(true);
+    setCaptureError(null);
+    try {
+      const info = await openS3Export(session.session_id, sessionId);
+      setS3Export(info);
+    } catch (e) {
+      setCaptureError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportBusy(false);
+    }
+  }, [session, sessionId]);
+
+  const captureStartBlocked = !hasSelection || (s3Active && !s3Tested);
   const handleDownloadMerged = useCallback(async () => {
     if (!session?.session_id || !sessionId) return;
     setExportBusy(true);
@@ -398,15 +540,15 @@ export default function Home() {
 
   if (!loggedIn) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-siem-bg">
+      <main className="min-h-screen flex items-center justify-center p-6 bg-siem-bg app-shell-root">
         <div className="w-full max-w-lg siem-card p-8">
-          <div className="flex items-center gap-3 mb-6">
-            <span className="h-10 w-10 rounded-md bg-siem-accent/20 border border-siem-accent/40 text-siem-accentHi flex items-center justify-center font-bold text-sm">
-              SPCG
-            </span>
-            <div>
-              <h1 className="text-xl font-semibold text-siem-text">Secure Packet Capture Gateway</h1>
-              <p className="text-sm text-siem-muted">Kubernetes · NetObserv eBPF</p>
+          <div className="flex items-start justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <span className="fluent-logo-mark h-10 w-10">SPCG</span>
+              <div>
+                <h1 className="text-xl font-semibold text-siem-text">Secure Packet Capture Gateway</h1>
+                <p className="text-sm text-siem-muted">Kubernetes · NetObserv eBPF</p>
+              </div>
             </div>
           </div>
           <p className="text-siem-muted text-sm mb-4">
@@ -414,23 +556,15 @@ export default function Home() {
           </p>
           <div className="flex gap-2 mb-4">
             <button
-              className={`flex-1 py-2 rounded-full text-sm font-semibold transition ${
-                authMode === "kubeconfig"
-                  ? "text-white shadow-[0_8px_20px_rgba(37,99,235,0.35)]"
-                  : "border border-siem-border text-siem-muted"
-              }`}
-              style={authMode === "kubeconfig" ? { background: "linear-gradient(180deg, #2d66ff 0%, #1f4ed8 100%)" } : undefined}
+              type="button"
+              className={authMode === "kubeconfig" ? "fluent-tab-active" : "fluent-tab-inactive"}
               onClick={() => setAuthMode("kubeconfig")}
             >
               Kubeconfig
             </button>
             <button
-              className={`flex-1 py-2 rounded-full text-sm font-semibold transition ${
-                authMode === "token"
-                  ? "text-white shadow-[0_8px_20px_rgba(37,99,235,0.35)]"
-                  : "border border-siem-border text-siem-muted"
-              }`}
-              style={authMode === "token" ? { background: "linear-gradient(180deg, #2d66ff 0%, #1f4ed8 100%)" } : undefined}
+              type="button"
+              className={authMode === "token" ? "fluent-tab-active" : "fluent-tab-inactive"}
               onClick={() => setAuthMode("token")}
             >
               Bearer token
@@ -476,14 +610,14 @@ export default function Home() {
 
   if (!workspaceReady) {
     return (
-      <main className="min-h-screen bg-siem-bg p-8 max-w-4xl mx-auto">
+      <main className="min-h-screen app-shell-root p-8 max-w-4xl mx-auto">
         <h1 className="text-xl font-semibold text-siem-text mb-2">Scope namespaces</h1>
         <p className="text-siem-muted text-sm mb-6">Tenant boundary — only selected namespaces appear in capture and topology.</p>
         <div className="grid gap-2 mb-6">
           {namespaces.map((n) => (
             <label
               key={n.name}
-              className="flex items-center gap-3 px-4 py-3 rounded-md siem-card cursor-pointer hover:border-siem-accent/40"
+              className="fluent-scope-row siem-card border border-siem-border"
             >
               <input type="checkbox" checked={!!selectedNs[n.name]} onChange={() => toggleNs(n.name)} />
               <span className="font-mono text-siem-text">{n.name}</span>
@@ -514,19 +648,15 @@ export default function Home() {
       <div className="flex gap-2">
         {!capturing ? (
           <button
-            className="px-4 py-2 rounded-full text-sm font-semibold text-[#062b20] disabled:opacity-40 shadow-[0_10px_22px_rgba(52,211,153,0.28)] transition"
-            style={{ background: "linear-gradient(180deg, #9cf7d0 0%, #68e8b7 100%)" }}
+            type="button"
+            className="fluent-capture-start"
             onClick={startCapture}
-            disabled={!hasSelection}
+            disabled={captureStartBlocked}
           >
             Start capture
           </button>
         ) : (
-          <button
-            className="px-4 py-2 rounded-full text-sm font-semibold text-[#4a1320] shadow-[0_10px_22px_rgba(251,113,133,0.25)] transition"
-            style={{ background: "linear-gradient(180deg, #ffd5dd 0%, #ffb9c8 100%)" }}
-            onClick={stopCapture}
-          >
+          <button type="button" className="fluent-capture-stop" onClick={stopCapture}>
             Stop capture
           </button>
         )}
@@ -542,12 +672,29 @@ export default function Home() {
           cluster={session?.cluster}
           sessionActive={!!session}
           captureActive={capturing}
+          active={showAI ? "ai" : activeSection}
+          flowAvailable={!!sessionId}
+          aiAvailable={!!sessionId}
+          onNavigate={navigateSection}
           onSignOut={() => handleLogout()}
         />
       }
       topbar={topbar}
     >
       <div className="space-y-6 max-w-[1400px]">
+
+      <div ref={workspaceRef} className="space-y-6">
+      {session && (
+        <S3CapturePanel
+          authSessionId={session.session_id}
+          tierLimits={tierLimits}
+          value={s3Config}
+          onChange={setS3Config}
+          tested={s3Tested}
+          onTested={setS3Tested}
+          disabled={capturing}
+        />
+      )}
 
       {workloadGroups.map((g) => (
         <section key={g.namespace} className="siem-card overflow-hidden">
@@ -605,7 +752,7 @@ export default function Home() {
       ))}
 
       {capturePods.length > 0 && (
-        <p className="text-xs text-siem-muted bg-siem-accent/10 border border-siem-accent/30 rounded-md px-3 py-2">
+        <p className="fluent-alert-info">
           Watching {capturePods.length} pod(s):{" "}
           {capturePods.map((p) => `${p.namespace}/${p.name}`).join(", ")}
           {capturing ? " · restarts update sensor filters automatically" : ""}
@@ -613,9 +760,14 @@ export default function Home() {
       )}
 
       {captureError && (
-        <p className="text-sm text-siem-err bg-siem-err/10 border border-siem-err/30 rounded-md px-3 py-2">
-          Capture error: {captureError}
-        </p>
+        <div className="fluent-alert-err">
+          <span>Capture error: {captureError}</span>
+          {captureError.includes("concurrent") && session && (
+            <button type="button" className="siem-btn-ghost text-xs" onClick={() => handleReleaseAllStreams()}>
+              Clear stuck streams
+            </button>
+          )}
+        </div>
       )}
 
       {(capturing || sessionId) && (
@@ -637,23 +789,28 @@ export default function Home() {
         </section>
       )}
 
+      </div>
+
       {sessionId && (
-        <>
+        <div ref={flowGraphRef} className="scroll-mt-6">
           <ObservabilityWorkbench
             topology={topology}
+            sigmaGraph={sigmaGraph}
             captureSummary={captureSummary}
             trackedPodIds={trackedPodIds.length ? trackedPodIds : selectionPodIds}
             loading={flowsLoading}
+            graphDegraded={graphDegraded}
             onRefresh={() => loadFlowTopology()}
-            onOpenAnalyst={() => setShowAI(true)}
             onEndSession={() => endCaptureSession()}
             sessionLabel={sessionId}
             capturePods={exportPodList}
             exportBusy={exportBusy}
+            s3Export={s3Export}
             onDownloadPod={(p) => handleDownloadPod(p)}
             onDownloadMerged={() => handleDownloadMerged()}
+            onOpenS3={() => handleOpenS3()}
           />
-        </>
+        </div>
       )}
 
       {showAI && sessionId && session && (
@@ -661,7 +818,10 @@ export default function Home() {
           open={showAI}
           sessionId={sessionId}
           authSessionId={session.session_id}
-          onClose={() => setShowAI(false)}
+          onClose={() => {
+            setShowAI(false);
+            setActiveSection(sessionId ? "flow" : "workspace");
+          }}
         />
       )}
       </div>

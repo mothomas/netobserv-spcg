@@ -59,7 +59,7 @@ func (c *TriageClient) Run(ctx context.Context, req TriageRequest) (*TriageRespo
 	chat := NewChatClient(req.ProxyURL)
 	resp, err := chat.Chat(ctx, ChatRequest{
 		Provider: provider, Model: model, APIEndpoint: endpoint, APIKey: req.BearerToken,
-		Messages: BuildTriageMessages(sanitized, ""),
+		Messages: BuildTriageMessages(sanitized, "", ""),
 	})
 	if err != nil {
 		return nil, err

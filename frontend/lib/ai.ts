@@ -1,4 +1,4 @@
-import { authHeaders } from "./api";
+import { authHeaders, type S3ExportInfo } from "./api";
 
 export type AIProvider =
   | "openai"
@@ -56,9 +56,14 @@ export type TopologyEdge = {
 
 export type SequenceStep = {
   rel_us: number;
+  at_us?: number;
+  direction?: "forward" | "reverse" | string;
+  phase?: "start" | "reply" | "data" | "close" | string;
   lane: string;
   label: string;
   flags?: string[];
+  src_port?: number;
+  dst_port?: number;
 };
 
 export type EdgeDetail = {
@@ -135,6 +140,8 @@ export type AIContextResponse = {
   capture_summary?: CaptureSummary;
   tracked_pod_ids?: string[];
   scrub_legend: Record<string, string>;
+  graph_context?: string;
+  s3_export?: S3ExportInfo | null;
 };
 
 export type AIChatResponse = {

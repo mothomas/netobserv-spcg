@@ -63,7 +63,7 @@ export function TrafficBurstChart({ buckets, durationSec, peakBucketPackets }: P
         </div>
       </div>
 
-      <div className="rounded-md border border-siem-border bg-siem-bg overflow-x-auto">
+      <div className="burst-chart-track">
         <div
           className="flex items-end gap-px px-1 py-2"
           style={{ width: widthPx, height: CHART_HEIGHT_PX }}
@@ -76,22 +76,21 @@ export function TrafficBurstChart({ buckets, durationSec, peakBucketPackets }: P
                 ? Math.max(2, Math.round((b.packets / maxPackets) * (CHART_HEIGHT_PX - 8)))
                 : 0;
             const isPeak = b.packets > 0 && b.packets >= maxPackets;
+            const barClass = isPeak
+              ? "burst-bar burst-bar-peak"
+              : b.packets > 0
+                ? "burst-bar"
+                : "burst-bar burst-bar-empty";
             return (
               <div
                 key={`${b.offsetMs}-${b.spanMs}`}
-                className="flex flex-col justify-end shrink-0 group"
+                className="flex flex-col justify-end shrink-0"
                 style={{ width: BAR_PX, height: CHART_HEIGHT_PX - 8 }}
                 onMouseEnter={() => setHover(b)}
                 onMouseLeave={() => setHover(null)}
               >
                 <div
-                  className={`w-full rounded-t transition-colors ${
-                    isPeak
-                      ? "bg-siem-warn group-hover:bg-amber-400"
-                      : b.packets > 0
-                        ? "bg-siem-accent/80 group-hover:bg-siem-accentHi"
-                        : "bg-siem-border/40"
-                  }`}
+                  className={barClass}
                   style={{ height: barPx }}
                   title={`${b.offsetMs}ms (+${b.spanMs}ms): ${b.packets} packets`}
                 />

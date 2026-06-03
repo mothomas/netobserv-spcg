@@ -1,8 +1,5 @@
 /** Styling aligned with networkplot-openshift/networkplot/html.py */
 
-export const K8S_ICON_BASE =
-  "https://raw.githubusercontent.com/kubernetes/community/master/icons/svg/resources/unlabeled/";
-
 export const ICON_MAP: Record<string, string> = {
   pod: "pod.svg",
   "service-clusterip": "svc.svg",
@@ -52,22 +49,48 @@ export const RANK_BY_TYPE: Record<string, number> = {
   "service-other": 6,
 };
 
-function svgUri(fill: string, stroke: string, text: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect x="4" y="4" width="56" height="56" rx="12" fill="${fill}" stroke="${stroke}" stroke-width="3"/><text x="32" y="38" text-anchor="middle" font-size="20" font-family="sans-serif" fill="${stroke}">${text}</text></svg>`;
+function svgUri(svg: string): string {
   return "data:image/svg+xml," + encodeURIComponent(svg);
 }
 
+function svgUriText(fill: string, stroke: string, text: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect x="4" y="4" width="56" height="56" rx="12" fill="${fill}" stroke="${stroke}" stroke-width="3"/><text x="32" y="38" text-anchor="middle" font-size="20" font-family="sans-serif" fill="${stroke}">${text}</text></svg>`;
+  return svgUri(svg);
+}
+
+const K8S_ICON_SVGS: Record<string, string> = {
+  pod: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 50 48"><path fill="#326ce5" d="M25 0 2 8.5v15L25 48l23-24.5V8.5z"/><path fill="#fff" d="M25 6.5 8 13v10.5L25 42l17-18.5V13z"/></svg>`,
+  svc: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" fill="#10b981"/><circle cx="32" cy="32" r="10" fill="#fff"/></svg>`,
+  ing: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect x="8" y="20" width="48" height="24" rx="6" fill="#22c55e"/><path fill="#fff" d="M28 32h16l-6-6v12z"/></svg>`,
+  node: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect x="10" y="14" width="44" height="36" rx="4" fill="#64748b"/><rect x="16" y="20" width="32" height="8" rx="2" fill="#fff"/><rect x="16" y="32" width="32" height="8" rx="2" fill="#cbd5e1"/></svg>`,
+  netpol: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path fill="#94a3b8" d="M32 6 8 18v14l24 26 24-26V18z"/><path fill="#fff" d="M32 16 16 24v8l16 18 16-18v-8z"/></svg>`,
+  pv: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><ellipse cx="32" cy="20" rx="20" ry="8" fill="#6366f1"/><rect x="12" y="20" width="40" height="24" fill="#818cf8"/><ellipse cx="32" cy="44" rx="20" ry="8" fill="#6366f1"/></svg>`,
+};
+
 const FALLBACK_SVGS: Record<string, string> = {
-  egressip: svgUri("#fff3cd", "#fd7e14", "E"),
-  egressservice: svgUri("#ede9fe", "#7c3aed", "S"),
-  nad: svgUri("#e7d4ff", "#6f42c1", "N"),
-  "loadbalancer-external": svgUri("#9be7a2", "#1e7e34", "LB"),
-  external: svgUri("#f8d7da", "#dc3544", "X"),
-  generic: svgUri("#e9ecef", "#6c757d", "?"),
+  egressip: svgUriText("#fff3cd", "#fd7e14", "E"),
+  egressservice: svgUriText("#ede9fe", "#7c3aed", "S"),
+  nad: svgUriText("#e7d4ff", "#6f42c1", "N"),
+  "loadbalancer-external": svgUriText("#9be7a2", "#1e7e34", "LB"),
+  external: svgUriText("#f8d7da", "#dc3544", "X"),
+  generic: svgUriText("#e9ecef", "#6c757d", "?"),
+};
+
+const ICON_FILE_TO_KEY: Record<string, string> = {
+  "pod.svg": "pod",
+  "svc.svg": "svc",
+  "ing.svg": "ing",
+  "node.svg": "node",
+  "netpol.svg": "netpol",
+  "pv.svg": "pv",
 };
 
 export function iconUrl(ntype: string): string {
-  if (ntype in ICON_MAP) return K8S_ICON_BASE + ICON_MAP[ntype];
+  const file = ICON_MAP[ntype];
+  if (file) {
+    const key = ICON_FILE_TO_KEY[file];
+    if (key && K8S_ICON_SVGS[key]) return svgUri(K8S_ICON_SVGS[key]);
+  }
   return FALLBACK_SVGS[ntype] ?? FALLBACK_SVGS.generic;
 }
 

@@ -1,6 +1,7 @@
 package pcap
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -37,6 +38,10 @@ type Session struct {
 	Created   time.Time
 	Tracked   []TrackedPod
 	pods      map[string]*PodBuffer
+	s3cfg     S3CaptureConfig
+	s3sink    *S3Sink
+	s3info    *S3ExportInfo
+	s3err     error
 	mu        sync.RWMutex
 }
 
@@ -47,6 +52,93 @@ func NewSession(namespace string) *Session {
 		Created:   time.Now().UTC(),
 		pods:      make(map[string]*PodBuffer),
 	}
+}
+
+// NewSessionWithS3 starts a capture that streams PCAP bytes to object storage instead of pod RAM.
+func NewSessionWithS3(ctx context.Context, namespace string, cfg S3CaptureConfig) (*Session, error) {
+	if err := cfg.ValidForCapture(); err != nil {
+		return nil, err
+	}
+	s := NewSession(namespace)
+	sink, err := NewS3Sink(ctx, cfg, s.ID)
+	if err != nil {
+		return nil, err
+	}
+	s.s3cfg = cfg
+	s.s3sink = sink
+	s.s3info = &S3ExportInfo{
+		Enabled: true, Bucket: cfg.Bucket, ObjectKey: sink.ObjectKey(),
+	}
+	return s, nil
+}
+
+func (s *Session) S3Enabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.s3sink != nil
+}
+
+func (s *Session) S3Config() S3CaptureConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.s3cfg
+}
+
+func (s *Session) S3Export() *S3ExportInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneS3ExportInfo(s.s3info)
+}
+
+func cloneS3ExportInfo(in *S3ExportInfo) *S3ExportInfo {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
+func (s *Session) FinalizeS3(ctx context.Context) (*S3ExportInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.s3sink == nil {
+		return cloneS3ExportInfo(s.s3info), nil
+	}
+	if s.s3info != nil && s.s3info.UploadDone {
+		return cloneS3ExportInfo(s.s3info), nil
+	}
+	info, err := s.s3sink.Close(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.s3info = info
+	s.s3sink = nil
+	return cloneS3ExportInfo(info), nil
+}
+
+func (s *Session) LastS3Error() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.s3err
+}
+
+func (s *Session) RefreshS3URL(ctx context.Context) (*S3ExportInfo, error) {
+	s.mu.RLock()
+	cfg := s.s3cfg
+	info := cloneS3ExportInfo(s.s3info)
+	s.mu.RUnlock()
+	if info == nil || !info.Enabled || info.ObjectKey == "" {
+		return nil, fmt.Errorf("s3 export not configured for session")
+	}
+	if !info.UploadDone {
+		return info, fmt.Errorf("s3 upload still in progress")
+	}
+	url, err := PresignS3Object(ctx, cfg, info.ObjectKey)
+	if err != nil {
+		return nil, err
+	}
+	info.ObjectURL = url
+	return info, nil
 }
 
 func (s *Session) Append(podName, podUID string, data []byte) {
@@ -66,6 +158,22 @@ func (s *Session) AppendFlow(podName, podUID string, data []byte, flowMetaJSON s
 		s.pods[key] = buf
 	}
 	now := time.Now().UTC()
+	if s.s3sink != nil {
+		if err := s.s3sink.WriteFrame(data, now); err != nil {
+			s.s3err = err
+			return
+		}
+		buf.Events = append(buf.Events, FlowEvent{
+			At: now, CapturePod: podName, CapturePodUID: podUID,
+			FlowMeta: parseFlowMeta(flowMetaJSON), Sequence: seq,
+		})
+		trimEventsOnly(buf)
+		buf.Bytes += uint64(len(data))
+		if s.s3info != nil {
+			s.s3info.Bytes = s.s3sink.BytesUploaded()
+		}
+		return
+	}
 	cp := make([]byte, len(data))
 	copy(cp, data)
 	buf.Frames = append(buf.Frames, frameRecord{Data: cp, At: now})
@@ -75,6 +183,12 @@ func (s *Session) AppendFlow(podName, podUID string, data []byte, flowMetaJSON s
 	})
 	trimPodBuffer(buf)
 	buf.Bytes += uint64(len(data))
+}
+
+func trimEventsOnly(buf *PodBuffer) {
+	if len(buf.Events) > maxEventsPerPod {
+		buf.Events = buf.Events[len(buf.Events)-maxEventsPerPod:]
+	}
 }
 
 func (s *Session) SetTrackedPods(pods []TrackedPod) {
@@ -156,6 +270,9 @@ func (s *Session) PodNames() []string {
 func (s *Session) ExportPod(podUID string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.s3sink != nil || (s.s3info != nil && s.s3info.Enabled) {
+		return nil, fmt.Errorf("per-pod PCAP export unavailable when streaming to S3; use merged object")
+	}
 	buf, ok := s.pods[podUID]
 	if !ok {
 		return nil, fmt.Errorf("no capture buffer for pod uid %s", podUID)
@@ -181,6 +298,9 @@ func (s *Session) PodExportName(podUID string) string {
 func (s *Session) ExportMerged() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.s3sink != nil || (s.s3info != nil && s.s3info.Enabled) {
+		return nil, fmt.Errorf("merged PCAP is stored in S3 for this session")
+	}
 	var all []frameRecord
 	for _, p := range s.pods {
 		all = append(all, p.Frames...)

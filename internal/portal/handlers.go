@@ -2,6 +2,7 @@ package portal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,10 +10,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	capturev1 "github.com/netobserv/spcg/api/proto/capture/v1"
 	"github.com/netobserv/spcg/internal/ai"
 	"github.com/netobserv/spcg/internal/auth"
+	"github.com/netobserv/spcg/internal/capture/admission"
 	"github.com/netobserv/spcg/internal/capture/sensor"
 	spcgk8s "github.com/netobserv/spcg/internal/k8s"
 	"github.com/netobserv/spcg/internal/pcap"
@@ -22,9 +25,11 @@ import (
 )
 
 type Server struct {
-	EngineAddr string
-	EngineTLS  grpcreds.TransportCredentials
-	Sessions   *auth.Store
+	EngineAddr    string
+	EngineTLS     grpcreds.TransportCredentials
+	Sessions      *auth.Store
+	Graph         *GraphStore
+	CaptureLimits admission.Limits
 }
 
 type aiSessionCreds struct {
@@ -48,8 +53,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/v1/namespaces/", s.handleNamespaceSubresource)
 	mux.HandleFunc("/api/v1/workloads", s.handleWorkloads)
 	mux.HandleFunc("/api/v1/capture/stream", s.handleCaptureStream)
+	mux.HandleFunc("/api/v1/capture/s3/test", s.handleCaptureS3Test)
+	mux.HandleFunc("/api/v1/capture/limits", s.handleCaptureLimits)
 	mux.HandleFunc("/api/v1/capture/", s.handleCaptureDownload)
 	s.registerAIRoutes(mux)
+	s.registerGraphRoutes(mux)
+	s.registerObservabilityRoutes(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -267,9 +276,58 @@ func (s *Server) handleWorkloads(w http.ResponseWriter, r *http.Request) {
 }
 
 type captureStartRequest struct {
-	Namespaces  []string                    `json:"namespaces"`
-	Namespace   string                      `json:"namespace"`
-	Selections  []spcgk8s.CaptureSelection  `json:"selections"`
+	Namespaces  []string                   `json:"namespaces"`
+	Namespace   string                     `json:"namespace"`
+	Selections  []spcgk8s.CaptureSelection `json:"selections"`
+	S3          pcap.S3CaptureConfig       `json:"s3"`
+}
+
+func (s *Server) handleCaptureS3Test(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := s.authSessionID(r); err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	var cfg pcap.S3CaptureConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	cfg.Enabled = true
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	if err := pcap.TestS3Connection(ctx, cfg); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleCaptureLimits(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := s.authSessionID(r); err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	limits := s.captureLimits()
+	writeJSON(w, map[string]interface{}{
+		"limits":                 limits.Public(),
+		"active_capture_count":   activeCaptureSessionCount(),
+		"stored_capture_count": storedCaptureSessionCount(),
+	})
+}
+
+func (s *Server) captureLimits() admission.Limits {
+	if s.CaptureLimits.MaxConcurrentSessions == 0 && s.CaptureLimits.MaxPodsPerSession == 0 {
+		return admission.LoadFromEnv()
+	}
+	return s.CaptureLimits
 }
 
 func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
@@ -302,6 +360,11 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	limits := s.captureLimits()
+	if err := limits.ValidateStart(len(resolved.Pods), activeCaptureSessionCount(), req.S3.Enabled); err != nil {
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return
+	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -316,7 +379,21 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 	if sessNS == "" && len(req.Namespaces) > 0 {
 		sessNS = req.Namespaces[0]
 	}
-	sess := pcap.NewSession(sessNS)
+	var sess *pcap.Session
+	if req.S3.Enabled {
+		if err := req.S3.ValidForCapture(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var err error
+		sess, err = pcap.NewSessionWithS3(r.Context(), sessNS, req.S3)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+	} else {
+		sess = pcap.NewSession(sessNS)
+	}
 	tracked := make([]pcap.TrackedPod, 0, len(resolved.Pods))
 	for _, p := range resolved.Pods {
 		kind := ""
@@ -331,9 +408,12 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 	sess.SetTrackedPods(tracked)
 	pcap.Store(sess)
 	registerCaptureSession(sess.ID, authSID)
+	markCaptureStreamActive(sess.ID)
+	defer releaseCaptureStream(sess.ID)
 
 	meta, _ := json.Marshal(map[string]interface{}{
 		"session_id": sess.ID, "resolved_pods": len(resolved.Pods), "sensor_filters": len(resolved.SensorTargets),
+		"s3_enabled": sess.S3Enabled(),
 	})
 	fmt.Fprintf(w, "event: session\ndata: %s\n\n", meta)
 	flusher.Flush()
@@ -425,6 +505,16 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			sess.AppendFlow(podName, podUID, chunk.GetData(), meta, chunk.GetSequence())
+			if err := sess.LastS3Error(); err != nil {
+				fmt.Fprintf(w, "event: error\ndata: s3 upload: %v\n\n", err)
+				flusher.Flush()
+				return
+			}
+			if reason, stop := limits.ShouldStopCapture(sess); stop {
+				fmt.Fprintf(w, "event: limit\ndata: %s\n\n", reason)
+				flusher.Flush()
+				return
+			}
 			chunkPayload := map[string]interface{}{
 				"session_id":       chunk.GetSessionId(),
 				"pod_name":         podName,
@@ -445,6 +535,19 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 
 	<-r.Context().Done()
 	<-done
+	if sess.S3Enabled() {
+	 finCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	 info, err := sess.FinalizeS3(finCtx)
+	 cancel()
+	 if err != nil {
+		 fmt.Fprintf(w, "event: error\ndata: s3 finalize: %v\n\n", err)
+		 flusher.Flush()
+	 } else if info != nil {
+		 payload, _ := json.Marshal(info)
+		 fmt.Fprintf(w, "event: s3_finalized\ndata: %s\n\n", payload)
+		 flusher.Flush()
+	 }
+	}
 	fmt.Fprintf(w, "event: end\ndata: %s\n\n", sess.ID)
 	flusher.Flush()
 }
@@ -464,14 +567,60 @@ func (s *Server) authSessionID(r *http.Request) (string, error) {
 
 func (s *Server) handleCaptureDownload(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/capture/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		http.Error(w, "expected .../teardown/{session}, .../download/{session}, or .../merge/{session}", http.StatusBadRequest)
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 1 || parts[0] == "" {
+		http.Error(w, "unknown capture action", http.StatusBadRequest)
 		return
 	}
-	action, sessionID := parts[0], parts[1]
+	action := parts[0]
+	sessionID := ""
+	if len(parts) >= 2 {
+		sessionID = parts[1]
+	}
+
+	if action == "release-stream" {
+		if sessionID == "" {
+			http.Error(w, "capture session id required", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		authSID, err := s.authSessionID(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		if !assertCaptureOwner(sessionID, authSID) {
+			http.Error(w, "capture session not found or access denied", http.StatusForbidden)
+			return
+		}
+		releaseCaptureStream(sessionID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if action == "release-all-streams" {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		authSID, err := s.authSessionID(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		n := releaseAllCaptureStreamsForAuth(authSID)
+		writeJSON(w, map[string]int{"released": n})
+		return
+	}
 
 	if action == "teardown" {
+		if sessionID == "" {
+			http.Error(w, "capture session id required", http.StatusBadRequest)
+			return
+		}
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -504,6 +653,21 @@ func (s *Server) handleCaptureDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
+
+	if action == "s3" || (action == "merge" && sess.S3Enabled()) {
+		info, err := sess.RefreshS3URL(r.Context())
+		if err != nil {
+			if sess.S3Enabled() {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			http.Error(w, "s3 export not enabled for session", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, info)
+		return
+	}
+
 	var data []byte
 	var filename string
 	var exportErr error

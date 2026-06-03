@@ -1,0 +1,9 @@
+# Medium tier — HA frontend, S3-required captures, higher concurrent session cap.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../small
+patches:
+  - path: patch-admission.yaml
+  - path: patch-replicas.yaml
+  - path: patch-ui-portal-resources.yaml

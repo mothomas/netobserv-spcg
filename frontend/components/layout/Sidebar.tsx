@@ -1,24 +1,33 @@
-"use client";
+export type AppSection = "workspace" | "flow" | "ai";
 
 type Props = {
   product: string;
   cluster?: string;
   sessionActive?: boolean;
   captureActive?: boolean;
+  active?: AppSection;
+  flowAvailable?: boolean;
+  aiAvailable?: boolean;
+  onNavigate?: (section: AppSection) => void;
   onSignOut?: () => void;
 };
 
-export function Sidebar({ product, cluster, sessionActive, captureActive, onSignOut }: Props) {
+export function Sidebar({
+  product,
+  cluster,
+  sessionActive,
+  captureActive,
+  active = "workspace",
+  flowAvailable,
+  aiAvailable,
+  onNavigate,
+  onSignOut,
+}: Props) {
   return (
     <>
       <div className="px-4 py-5 border-b border-siem-border">
         <div className="flex items-center gap-2">
-          <span
-            className="h-8 w-8 rounded-full border border-blue-300/35 flex items-center justify-center text-xs font-bold text-white shadow-[0_8px_20px_rgba(37,99,235,0.35)]"
-            style={{ background: "linear-gradient(180deg, #2d66ff 0%, #1f4ed8 100%)" }}
-          >
-            SPCG
-          </span>
+          <span className="fluent-logo-mark h-9 w-9">SPCG</span>
           <div>
             <p className="text-sm font-semibold text-siem-text">{product}</p>
             <p className="text-[10px] text-siem-muted uppercase tracking-wide">Packet observability</p>
@@ -26,12 +35,31 @@ export function Sidebar({ product, cluster, sessionActive, captureActive, onSign
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 text-sm">
-        <NavItem label="Workspace" active />
-        <NavItem label="Capture" hint={captureActive ? "Live" : "Idle"} hintTone={captureActive ? "ok" : "muted"} />
-        <NavItem label="Flow graph" />
-        <NavItem label="AI analyst" />
+        <NavItem
+          label="Workspace"
+          active={active === "workspace"}
+          onClick={() => onNavigate?.("workspace")}
+        />
+        <NavItem
+          label="Capture"
+          hint={captureActive ? "Live" : "Idle"}
+          hintTone={captureActive ? "ok" : "muted"}
+          disabled
+        />
+        <NavItem
+          label="Flow graph"
+          active={active === "flow"}
+          disabled={!flowAvailable}
+          onClick={() => flowAvailable && onNavigate?.("flow")}
+        />
+        <NavItem
+          label="AI analyst"
+          active={active === "ai"}
+          disabled={!aiAvailable}
+          onClick={() => aiAvailable && onNavigate?.("ai")}
+        />
       </nav>
-      <div className="px-4 py-4 border-t border-siem-border space-y-2 text-xs">
+      <div className="px-4 py-4 border-t border-siem-border space-y-3 text-xs">
         {cluster && (
           <p className="text-siem-muted">
             Cluster <span className="font-mono text-siem-text">{cluster}</span>
@@ -53,32 +81,47 @@ function NavItem({
   active,
   hint,
   hintTone,
+  disabled,
+  onClick,
 }: {
   label: string;
   active?: boolean;
   hint?: string;
   hintTone?: "ok" | "muted";
+  disabled?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <div
-      className={`flex items-center justify-between px-3 py-2 rounded-md ${
-        active
-          ? "text-white border border-blue-300/30 shadow-[0_8px_20px_rgba(37,99,235,0.3)]"
-          : "text-siem-muted hover:text-siem-text hover:bg-siem-card"
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`w-full flex items-center justify-between px-3 py-2 rounded-siem text-left transition ${
+        disabled
+          ? "opacity-40 cursor-not-allowed"
+          : active
+            ? "fluent-nav-active"
+            : "fluent-nav-idle hover:bg-siem-panel/60"
       }`}
-      style={active ? { background: "linear-gradient(180deg, #2d66ff 0%, #1f4ed8 100%)" } : undefined}
     >
       <span>{label}</span>
       {hint && (
         <span
-          className={`text-[10px] px-1.5 py-0.5 rounded ${
-            hintTone === "ok" ? "bg-siem-ok/20 text-siem-ok" : "bg-siem-border text-siem-muted"
+          className={`text-[10px] px-1.5 py-0.5 rounded-md ${
+            hintTone === "ok"
+              ? "text-siem-ok border border-siem-ok/30"
+              : "text-siem-muted border border-siem-border"
           }`}
+          style={
+            hintTone === "ok"
+              ? { background: "color-mix(in srgb, var(--siem-ok) 18%, transparent)" }
+              : { background: "color-mix(in srgb, var(--siem-border) 80%, transparent)" }
+          }
         >
           {hint}
         </span>
       )}
-    </div>
+    </button>
   );
 }
 

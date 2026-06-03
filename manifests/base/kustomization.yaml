@@ -4,5 +4,7 @@ resources:
   - namespace-capture.yaml
   - namespace-frontend.yaml
   - network-policies.yaml
+  - config-capture-admission.yaml
   - deployment-capture.yaml
   - deployment-frontend.yaml
+  - deployment-neo4j.yaml

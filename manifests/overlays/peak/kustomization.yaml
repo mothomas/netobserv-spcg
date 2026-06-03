@@ -1,0 +1,9 @@
+# Peak tier — incident burst: more replicas, engine shard, HPA on frontend.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../medium
+  - hpa-frontend.yaml
+patches:
+  - path: patch-admission.yaml
+  - path: patch-replicas.yaml

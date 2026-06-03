@@ -167,7 +167,11 @@ func (s *Server) handleAIContext(w http.ResponseWriter, r *http.Request) {
 	}
 	events := sess.Events()
 	tracked := sess.TrackedPods()
-	graph, topology := pcap.MergeTopologyIntoGraph(events, tracked)
+	topo, _ := pcap.BuildBoundedTopology(events, tracked)
+	graph, _ := pcap.MergeTopologyIntoGraph(pcap.SampleEventsForGraph(events, pcap.MaxTopologyBuildEvents), tracked)
+	if authSID, err := s.authSessionID(r); err == nil {
+		go s.syncTopologyToGraph(captureID, authSID, topo, tracked)
+	}
 	summary := pcap.BuildCaptureSummary(events, tracked)
 	lineCount := 0
 	if len(jsonl) > 0 {
@@ -177,16 +181,19 @@ func (s *Server) handleAIContext(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	graphCtx := buildScrubbedGraphContext(scrub, topo)
 	writeJSON(w, map[string]interface{}{
 		"session_id":       captureID,
 		"event_count":      len(events),
 		"jsonl_lines":      lineCount,
 		"jsonl_preview":    truncate(string(jsonl), 12000),
 		"flow_graph":       graph,
-		"topology":         topology,
+		"topology":         topo,
 		"capture_summary":  summary,
 		"tracked_pod_ids":  sess.TrackedPodIDList(),
 		"scrub_legend":     scrub.SnapshotMap(),
+		"graph_context":    graphCtx,
+		"s3_export":        sess.S3Export(),
 	})
 }
 
@@ -249,7 +256,11 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonl, _ := pcapSess.ExportJSONL(scrub, 400)
-	msgs := ai.BuildTriageMessages(string(jsonl), "")
+	events := pcapSess.Events()
+	tracked := pcapSess.TrackedPods()
+	topo, _ := pcap.BuildBoundedTopology(events, tracked)
+	graphCtx := buildScrubbedGraphContext(scrub, topo)
+	msgs := ai.BuildTriageMessages(string(jsonl), graphCtx, "")
 
 	chatHistMu.Lock()
 	hist := chatHist[captureID]
@@ -262,15 +273,12 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	chatHistMu.Unlock()
 
 	if body.Message == "" && len(hist) <= len(msgs) {
-		// Initial context load only — no upstream call.
-		tracked := pcapSess.TrackedPods()
-		g, topo := pcap.MergeTopologyIntoGraph(pcapSess.Events(), tracked)
 		writeJSON(w, map[string]interface{}{
 			"reply":           "",
-			"flow_graph":      g,
-			"topology":        topo,
-			"capture_summary": pcap.BuildCaptureSummary(pcapSess.Events(), tracked),
-			"jsonl_lines": countLines(jsonl),
+			"capture_summary": pcap.BuildCaptureSummary(events, tracked),
+			"jsonl_lines":     countLines(jsonl),
+			"scrub_legend":    scrub.SnapshotMap(),
+			"graph_context":   graphCtx,
 		})
 		return
 	}
@@ -322,14 +330,10 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	chatHist[captureID] = hist
 	chatHistMu.Unlock()
 
-	tracked := pcapSess.TrackedPods()
-	g, topo := pcap.MergeTopologyIntoGraph(pcapSess.Events(), tracked)
 	writeJSON(w, map[string]interface{}{
 		"reply":           reply,
-		"flow_graph":      g,
-		"topology":        topo,
-		"capture_summary": pcap.BuildCaptureSummary(pcapSess.Events(), tracked),
-		"scrub_legend": scrub.SnapshotMap(),
+		"capture_summary": pcap.BuildCaptureSummary(events, tracked),
+		"scrub_legend":    scrub.SnapshotMap(),
 	})
 }
 

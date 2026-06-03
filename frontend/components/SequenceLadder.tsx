@@ -5,90 +5,102 @@ import type { SequenceStep } from "@/lib/ai";
 type Props = {
   steps: SequenceStep[];
   srcLabel: string;
-  hostLabel: string;
   dstLabel: string;
+  proto?: string;
+  ports?: string;
 };
 
-const LANES = [
-  { id: "src", title: "Source namespace" },
-  { id: "host", title: "Node / network stack" },
-  { id: "dst", title: "Target namespace" },
-] as const;
+const PHASE_TONE: Record<string, string> = {
+  start: "text-cyan-300 border-cyan-400/40 bg-cyan-500/10",
+  reply: "text-emerald-300 border-emerald-400/40 bg-emerald-500/10",
+  data: "text-siem-text border-siem-border bg-siem-card",
+  close: "text-rose-300 border-rose-400/40 bg-rose-500/10",
+};
 
-export function SequenceLadder({ steps, srcLabel, hostLabel, dstLabel }: Props) {
+export function SequenceLadder({ steps, srcLabel, dstLabel, proto, ports }: Props) {
   if (!steps.length) {
     return (
-      <p className="text-sm text-slate-500 py-8 text-center">
-        Select a flow edge to render packet sequence (SYN / ACK / RST) on a relative timeline.
+      <p className="text-sm text-siem-muted py-6 text-center px-4">
+        No packet sequence captured for this link yet. Keep capture running or select a busier edge.
       </p>
     );
   }
 
-  const maxUs = Math.max(...steps.map((s) => s.rel_us), 1);
-  const width = Math.max(860, steps.length * 78 + 180);
-  const laneY = 96;
-  const height = 220;
-
-  const laneTitle = (id: string) => {
-    if (id === "src") return srcLabel;
-    if (id === "host") return hostLabel;
-    return dstLabel;
-  };
-
   return (
-    <div className="rounded-md border border-siem-border bg-siem-bg overflow-x-auto">
-      <svg width={width} height={height} className="min-w-full" role="img" aria-label="Packet sequence ladder timeline">
-        <text x={12} y={22} className="fill-siem-text text-[11px] font-medium">
-          Source
-        </text>
-        <text x={12} y={36} className="fill-siem-muted text-[10px]">
-          {laneTitle("src").slice(0, 44)}
-        </text>
-        <text x={12} y={56} className="fill-siem-text text-[11px] font-medium">
-          Host stack
-        </text>
-        <text x={12} y={70} className="fill-siem-muted text-[10px]">
-          {laneTitle("host").slice(0, 44)}
-        </text>
-        <text x={12} y={90} className="fill-siem-text text-[11px] font-medium">
-          Destination
-        </text>
-        <text x={12} y={104} className="fill-siem-muted text-[10px]">
-          {laneTitle("dst").slice(0, 44)}
-        </text>
+    <div className="flow-seq-panel">
+      <div className="flow-seq-participants">
+        <Participant title="Source" label={srcLabel} align="left" />
+        <div className="flow-seq-link-meta">
+          {proto && <span className="flow-seq-proto">{proto}</span>}
+          {ports && ports !== "—" && <span className="flow-seq-ports">{ports}</span>}
+          <span className="flow-seq-hint">{steps.length} message{steps.length === 1 ? "" : "s"}</span>
+        </div>
+        <Participant title="Destination" label={dstLabel} align="right" />
+      </div>
 
-        <line x1={140} y1={laneY} x2={width - 24} y2={laneY} stroke="#34d399" strokeWidth={2} strokeOpacity={0.6} />
-
-        {steps.map((s, idx) => {
-          const x = 140 + (s.rel_us / maxUs) * (width - 180);
-          const labelAbove = idx % 2 === 0;
-          const labelY = labelAbove ? laneY - 18 : laneY + 28;
-          const tsY = labelAbove ? laneY - 5 : laneY + 45;
-          const isReset = s.flags?.includes("RST");
-          const isSyn = s.flags?.includes("SYN");
-          const fill = isReset ? "#fb7185" : isSyn ? "#22d3ee" : "#34d399";
+      <ol className="flow-seq-list" aria-label="Flow message sequence">
+        {steps.map((step, idx) => {
+          const forward = (step.direction || step.lane) !== "reverse";
+          const phase = step.phase || inferPhase(step);
+          const tone = PHASE_TONE[phase] ?? PHASE_TONE.data;
           return (
-            <g key={`${s.rel_us}_${idx}`}>
-              <line x1={x} y1={laneY - 12} x2={x} y2={laneY + 12} stroke="#1f2937" strokeWidth={1} />
-              <circle cx={x} cy={laneY} r={5} fill={fill} stroke="#0b0f17" strokeWidth={2} />
-              <rect x={x - 52} y={labelY - 10} width={104} height={14} rx={4} fill="#0b1220" fillOpacity={0.88} />
-              <text x={x} y={labelY} textAnchor="middle" className="fill-siem-text text-[9px] font-medium">
-                {s.label.slice(0, 22)}
-              </text>
-              <text x={x} y={tsY} textAnchor="middle" className="fill-siem-muted text-[8px] font-mono">
-                +{s.rel_us}us
-              </text>
-            </g>
+            <li key={`${step.at_us ?? step.rel_us}_${idx}`} className="flow-seq-row">
+              <span className="flow-seq-num">{idx + 1}</span>
+              <div className={`flow-seq-msg ${tone}`}>
+                <span className="flow-seq-phase">{phaseLabel(phase)}</span>
+                <span className="flow-seq-label">{step.label}</span>
+              </div>
+              <div className={`flow-seq-arrow ${forward ? "is-forward" : "is-reverse"}`} aria-hidden>
+                <span className="flow-seq-arrow-line" />
+                <span className="flow-seq-arrow-head">{forward ? "▶" : "◀"}</span>
+                <span className="flow-seq-arrow-from">{forward ? srcLabel : dstLabel}</span>
+                <span className="flow-seq-arrow-to">{forward ? dstLabel : srcLabel}</span>
+              </div>
+              <span className="flow-seq-time">+{formatUs(step.rel_us)}</span>
+            </li>
           );
         })}
-
-        <text x={140} y={height - 12} className="fill-siem-muted text-[9px] font-mono">
-          0us
-        </text>
-        <text x={width - 62} y={height - 12} className="fill-siem-muted text-[9px] font-mono">
-          {maxUs}us
-        </text>
-      </svg>
+      </ol>
     </div>
   );
+}
+
+function Participant({ title, label, align }: { title: string; label: string; align: "left" | "right" }) {
+  return (
+    <div className={`flow-seq-participant ${align === "right" ? "text-right" : ""}`}>
+      <div className="flow-seq-participant-title">{title}</div>
+      <div className="flow-seq-participant-label" title={label}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function phaseLabel(phase: string): string {
+  switch (phase) {
+    case "start":
+      return "Start";
+    case "reply":
+      return "Reply";
+    case "close":
+      return "Close";
+    default:
+      return "Data";
+  }
+}
+
+function inferPhase(step: SequenceStep): string {
+  const flags = new Set((step.flags ?? []).map((f) => f.toUpperCase()));
+  if (flags.has("RST") || flags.has("FIN")) return "close";
+  if (flags.has("SYN") && !flags.has("ACK")) return "start";
+  if (flags.has("SYN") && flags.has("ACK")) return "reply";
+  if (flags.has("PSH")) return "data";
+  if (flags.has("ACK")) return "reply";
+  return "data";
+}
+
+function formatUs(us: number): string {
+  if (us >= 1_000_000) return `${(us / 1_000_000).toFixed(2)}s`;
+  if (us >= 1_000) return `${(us / 1_000).toFixed(1)}ms`;
+  return `${us}µs`;
 }

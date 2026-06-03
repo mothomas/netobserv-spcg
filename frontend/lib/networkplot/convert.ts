@@ -11,6 +11,8 @@ export type ForceNode = {
   border: string;
   textColor: string;
   size: number;
+  x?: number;
+  y?: number;
 };
 
 export type ForceLink = {
@@ -34,7 +36,7 @@ export type NetworkPlotElements = {
 
 /** Strict tenant boundary: only selected pods + one-hop flow peers. */
 export function isolateToTrackedPods(topology: FlowTopology, trackedIds: Set<string>): FlowTopology {
-  if (trackedIds.size === 0) return { nodes: [], edges: [], namespaces: [], edge_details: {} };
+  if (trackedIds.size === 0) return topology;
   const touches = (id: string) => trackedIds.has(id);
   const edges: TopologyEdge[] = [];
   const nodeIds = new Set<string>();
@@ -46,6 +48,7 @@ export function isolateToTrackedPods(topology: FlowTopology, trackedIds: Set<str
     }
   }
   const nodes = topology.nodes.filter((n) => nodeIds.has(n.id));
+  if (!nodes.length || !edges.length) return topology;
   const ns = [...new Set(nodes.map((n) => n.namespace).filter(Boolean))].sort();
   const details: FlowTopology["edge_details"] = {};
   for (const e of edges) {
@@ -83,7 +86,7 @@ function nodeToForce(n: TopologyNode, trackedIds: Set<string>): ForceNode {
     color: colorSeed,
     border: tracked ? "#94b4ff" : style.border,
     textColor: "#eaf2ff",
-    size: tracked ? 10 : ntype === "external" ? 7 : 8,
+    size: tracked ? 10 : ntype === "external" ? 8 : 9,
   };
 }
 
@@ -104,21 +107,21 @@ export function flowTopologyToNetworkPlot(
     const key = undirectedPair(e.from, e.to);
     pairCount.set(key, (pairCount.get(key) ?? 0) + 1);
   }
-  const showDenseLabels = isolated.edges.length <= 42;
+
   const links: ForceLink[] = isolated.edges.map((e, i) => {
     const pairKey = undirectedPair(e.from, e.to);
     const idx = pairIndex.get(pairKey) ?? 0;
     pairIndex.set(pairKey, idx + 1);
     const total = pairCount.get(pairKey) ?? 1;
-    const spread = total > 1 ? (idx - (total - 1) / 2) * 0.16 : 0;
-    const width = Math.max(0.7, Math.min(2.1, Math.log2((e.packets || e.count || 1) + 1) * 0.38));
+    const spread = total > 1 ? (idx - (total - 1) / 2) * 0.2 : 0;
+    const width = Math.max(0.35, Math.min(1.2, Math.log2((e.packets || e.count || 1) + 1) * 0.2));
     const externalIp = externalPeerIP(e.from, e.to);
-    const distance = externalIp ? 420 : 330;
+    const distance = externalIp ? 320 : 220;
     return {
       id: e.id || `e${i}_${e.from}_${e.to}`,
       source: e.from,
       target: e.to,
-      label: showDenseLabels ? edgeLabel(e) : "",
+      label: edgeLabel(e),
       edgeType: edgeType(e.health) as ForceLink["edgeType"],
       topologyEdgeId: e.id,
       curvature: spread,

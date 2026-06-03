@@ -14,6 +14,8 @@ SPCG runs on **any CNCF-compliant Kubernetes cluster** (1.26+) with eBPF-capable
 | UI access | NodePort `:30080` on `spcg-frontend` | `manifests/openshift/route-openshift.yaml` |
 | Privileged capture SA | `securityContext.privileged` | `manifests/openshift/rbac-capture.yaml` + SCC |
 
+For full deployment topology, tier overlays, and SCC details see **[DEPLOYMENT.md](./DEPLOYMENT.md)** and **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
+
 ## Deploy on vanilla Kubernetes
 
 ```bash

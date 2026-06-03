@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ui-portal
-          image: docker.io/mothomas/spcg-ui-portal:enterprise-graphfix-20260602
+          image: docker.io/mothomas/spcg-ui-portal:neo4j-sigma-20260602
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -34,6 +34,23 @@ spec:
               value: ":8080"
             - name: ENGINE_GRPC_ADDR
               value: "spcg-backend-engine.pcap-capture.svc.cluster.local:8443"
+            - name: NEO4J_URI
+              value: "bolt://spcg-neo4j.pcap-frontend.svc.cluster.local:7687"
+            - name: NEO4J_USER
+              value: neo4j
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-neo4j-auth
+                  key: password
+            - name: GRAPH_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-graph-master-key
+                  key: GRAPH_MASTER_KEY
+          envFrom:
+            - configMapRef:
+                name: spcg-capture-admission
           resources:
             requests:
               cpu: 100m
@@ -96,7 +113,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: docker.io/mothomas/spcg-frontend:anti-stack-20260602
+          image: docker.io/mothomas/spcg-frontend:neo4j-sigma-20260602
           imagePullPolicy: Always
           ports:
             - containerPort: 3000

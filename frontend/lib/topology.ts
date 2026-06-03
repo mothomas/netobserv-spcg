@@ -36,6 +36,18 @@ export function emptyTopology(): FlowTopology {
   return { nodes: [], edges: [], namespaces: [], edge_details: {} };
 }
 
+/** Ensure topology arrays are never null (API/JSON may omit or null them). */
+export function normalizeTopology(t: FlowTopology | null | undefined): FlowTopology {
+  if (!t) return emptyTopology();
+  return {
+    ...t,
+    nodes: t.nodes ?? [],
+    edges: t.edges ?? [],
+    namespaces: t.namespaces ?? [],
+    edge_details: t.edge_details ?? {},
+  };
+}
+
 export function mergeTopology(
   prev: FlowTopology | null | undefined,
   next: FlowTopology | undefined

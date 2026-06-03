@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/netobserv/spcg/internal/auth"
+	"github.com/netobserv/spcg/internal/capture/admission"
+	graphdb "github.com/netobserv/spcg/internal/graph/neo4j"
 	"github.com/netobserv/spcg/internal/portal"
 	"github.com/netobserv/spcg/internal/tlsutil"
 	"google.golang.org/grpc/credentials"
@@ -31,11 +34,25 @@ func main() {
 		engineCreds = insecure.NewCredentials()
 	}
 
-	srv := &portal.Server{
-		EngineAddr: engineAddr,
-		EngineTLS:  engineCreds,
-		Sessions:   auth.NewStore(0),
+	ctx := context.Background()
+	graphStore, err := graphdb.Open(ctx)
+	if err != nil {
+		log.Fatalf("neo4j: %v", err)
 	}
+	if graphStore.Enabled() {
+		log.Printf("neo4j graph store connected")
+	} else {
+		graphdb.LogDisabled()
+	}
+
+	srv := &portal.Server{
+		EngineAddr:    engineAddr,
+		EngineTLS:     engineCreds,
+		Sessions:      auth.NewStore(0),
+		Graph:         graphStore,
+		CaptureLimits: admission.LoadFromEnv(),
+	}
+	portal.SetCaptureGraph(graphStore)
 
 	handler := cors(srv.Routes())
 	httpServer := &http.Server{

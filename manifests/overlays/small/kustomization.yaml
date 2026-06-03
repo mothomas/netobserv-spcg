@@ -1,0 +1,12 @@
+# Small tier — default admission caps and single-replica frontend plane.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../kubernetes
+images:
+  - name: docker.io/mothomas/spcg-ui-portal
+    newName: docker.io/mothomas/spcg-ui-portal
+    newTag: small-20260611
+  - name: docker.io/mothomas/spcg-frontend
+    newName: docker.io/mothomas/spcg-frontend
+    newTag: small-20260613

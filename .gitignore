@@ -10,3 +10,7 @@ kubeconfig
 kubeconfig.*
 *.kubeconfig
 admin.conf
+
+# Lab-only threat sim (branch lab/random-scanner — never commit on main)
+manifests/lab/
+scripts/lab/

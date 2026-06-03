@@ -1,0 +1,14 @@
+# SPCG documentation index
+
+| Document | Audience | Contents |
+|----------|----------|----------|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Architects, security reviewers | Design ideology, concepts, component model, end-to-end data flows, decision log |
+| [DEPLOYMENT.md](./DEPLOYMENT.md) | Platform / SRE | Manifest layout, Small/Medium/Peak overlays, vanilla K8s vs OpenShift, SCC, Routes, network policy map |
+| [CODE-STRUCTURE.md](./CODE-STRUCTURE.md) | Developers | Repository layout, package boundaries, conventions, security patterns in code |
+| [architecture-tiers.md](./architecture-tiers.md) | Capacity planning | Tier sizing matrix, scaling levers, roadmap items |
+| [kubernetes-vs-openshift.md](./kubernetes-vs-openshift.md) | Quick platform compare | Auth, NodePort vs Route, PSS |
+| [neo4j-graph.md](./neo4j-graph.md) | Graph / multi-tenant | Neo4j pipeline, tenant crypto, query isolation |
+| [ci-cd.md](./ci-cd.md) | Release engineering | Image build and registry |
+| [lab-random-scanner.md](./lab-random-scanner.md) | Lab only | Threat-sim branch (not on `main`) |
+
+Start with **ARCHITECTURE.md** and **DEPLOYMENT.md** for a full picture.

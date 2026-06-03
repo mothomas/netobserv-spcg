@@ -43,10 +43,15 @@ type TopologyEdge struct {
 
 // SequenceStep is one packet marker on the ladder diagram.
 type SequenceStep struct {
-	RelUs  int64    `json:"rel_us"`
-	Lane   string   `json:"lane"`
-	Label  string   `json:"label"`
-	Flags  []string `json:"flags,omitempty"`
+	RelUs     int64    `json:"rel_us"`
+	AtUs      int64    `json:"at_us,omitempty"`
+	Direction string   `json:"direction,omitempty"` // forward | reverse (relative to selected edge)
+	Phase     string   `json:"phase,omitempty"`     // start | reply | data | close
+	Lane      string   `json:"lane"`
+	Label     string   `json:"label"`
+	Flags     []string `json:"flags,omitempty"`
+	SrcPort   uint16   `json:"src_port,omitempty"`
+	DstPort   uint16   `json:"dst_port,omitempty"`
 }
 
 // EdgeDetail holds deep metrics and sequence for a selected edge.
@@ -169,9 +174,13 @@ func BuildFlowTopology(events []FlowEvent, tracked []TrackedPod) FlowTopology {
 				acc.first = ev.At
 			}
 			rel := ev.At.Sub(acc.first).Microseconds()
-			lane := sequenceLane(fromN, toN)
-			lbl := sequenceLabel(fs, tcpFlags)
-			acc.steps = append(acc.steps, SequenceStep{RelUs: rel, Lane: lane, Label: lbl, Flags: tcpFlags})
+			phase := sequencePhase(tcpFlags)
+			lbl := sequenceLabel(fs, tcpFlags, phase)
+			acc.steps = append(acc.steps, SequenceStep{
+				RelUs: rel, AtUs: ev.At.UnixMicro(), Direction: "forward", Phase: phase,
+				Lane: "forward", Label: lbl, Flags: tcpFlags,
+				SrcPort: fs.SrcPort, DstPort: fs.DstPort,
+			})
 		}
 	}
 
@@ -217,6 +226,12 @@ func BuildFlowTopology(events []FlowEvent, tracked []TrackedPod) FlowTopology {
 		namespaces = append(namespaces, ns)
 	}
 	sort.Strings(namespaces)
+
+	partial := FlowTopology{Nodes: nodes, Edges: outEdges, EdgeDetail: details}
+	for id, d := range details {
+		d.Sequence = ConversationSequence(partial, id)
+		details[id] = d
+	}
 
 	return FlowTopology{
 		Nodes:      nodes,
@@ -427,24 +442,115 @@ func tcpFlagsFromMeta(m map[string]interface{}) []string {
 	return nil
 }
 
-func sequenceLane(from, to TopologyNode) string {
-	if from.Namespace != "" {
-		return "src"
+func sequencePhase(flags []string) string {
+	set := map[string]struct{}{}
+	for _, f := range flags {
+		set[strings.ToUpper(f)] = struct{}{}
 	}
-	if to.Namespace != "" {
-		return "dst"
+	_, hasSyn := set["SYN"]
+	_, hasAck := set["ACK"]
+	_, hasFin := set["FIN"]
+	_, hasRst := set["RST"]
+	_, hasPsh := set["PSH"]
+	if hasRst || hasFin {
+		return "close"
 	}
-	return "host"
+	if hasSyn && !hasAck {
+		return "start"
+	}
+	if hasSyn && hasAck {
+		return "reply"
+	}
+	if hasPsh {
+		return "data"
+	}
+	if hasAck {
+		return "reply"
+	}
+	return "data"
 }
 
-func sequenceLabel(fs FrameSummary, flags []string) string {
-	if len(flags) > 0 {
-		return strings.Join(flags, "+")
+func sequenceLabel(fs FrameSummary, flags []string, phase string) string {
+	flagStr := strings.Join(flags, "+")
+	if flagStr == "" {
+		if fs.Proto != "" {
+			flagStr = fs.Proto
+		} else {
+			flagStr = "pkt"
+		}
 	}
-	if fs.Proto != "" {
-		return fs.Proto
+	portHint := ""
+	if fs.SrcPort > 0 && fs.DstPort > 0 {
+		portHint = fmt.Sprintf(" :%d→:%d", fs.SrcPort, fs.DstPort)
 	}
-	return "pkt"
+	switch phase {
+	case "start":
+		return "Start · " + flagStr + portHint
+	case "reply":
+		return "Reply · " + flagStr + portHint
+	case "close":
+		return "Close · " + flagStr + portHint
+	default:
+		return "Data · " + flagStr + portHint
+	}
+}
+
+// ConversationSequence merges forward and reply packets for a directed edge pair.
+func ConversationSequence(topo FlowTopology, selectedEdgeID string) []SequenceStep {
+	var edge *TopologyEdge
+	for i := range topo.Edges {
+		if topo.Edges[i].ID == selectedEdgeID {
+			edge = &topo.Edges[i]
+			break
+		}
+	}
+	if edge == nil {
+		return nil
+	}
+	fwd := cloneSequenceSteps(topo.EdgeDetail[selectedEdgeID].Sequence, "forward")
+	revID := edgeID(edge.To, edge.From)
+	rev := cloneSequenceSteps(topo.EdgeDetail[revID].Sequence, "reverse")
+	if len(fwd) == 0 && len(rev) == 0 {
+		return nil
+	}
+	out := append(fwd, rev...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AtUs != out[j].AtUs {
+			return out[i].AtUs < out[j].AtUs
+		}
+		return out[i].RelUs < out[j].RelUs
+	})
+	if len(out) > 48 {
+		out = out[:48]
+	}
+	base := out[0].AtUs
+	if base == 0 {
+		base = 0
+		for _, s := range out {
+			if s.AtUs > 0 && (base == 0 || s.AtUs < base) {
+				base = s.AtUs
+			}
+		}
+	}
+	for i := range out {
+		if base > 0 && out[i].AtUs > 0 {
+			out[i].RelUs = out[i].AtUs - base
+		}
+	}
+	return out
+}
+
+func cloneSequenceSteps(steps []SequenceStep, direction string) []SequenceStep {
+	if len(steps) == 0 {
+		return nil
+	}
+	out := make([]SequenceStep, len(steps))
+	for i, s := range steps {
+		out[i] = s
+		out[i].Direction = direction
+		out[i].Lane = direction
+	}
+	return out
 }
 
 // DiagnoseDrop maps netobserv drop causes to plain English.

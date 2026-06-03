@@ -1,15 +1,18 @@
 package portal
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"github.com/netobserv/spcg/internal/ai"
 	"github.com/netobserv/spcg/internal/pcap"
 )
 
 var (
-	captureOwnerMu sync.Mutex
-	captureOwners  = make(map[string]string) // capture session id -> auth session id
+	captureOwnerMu       sync.Mutex
+	captureOwners        = make(map[string]string) // capture session id -> auth session id
+	activeCaptureStreams = make(map[string]struct{}) // sessions with an open SSE ingest stream
 )
 
 func registerCaptureSession(captureID, authSessionID string) {
@@ -21,10 +24,54 @@ func registerCaptureSession(captureID, authSessionID string) {
 	captureOwnerMu.Unlock()
 }
 
-func captureAuthOwner(captureID string) string {
+func markCaptureStreamActive(captureID string) {
+	if captureID == "" {
+		return
+	}
+	captureOwnerMu.Lock()
+	activeCaptureStreams[captureID] = struct{}{}
+	captureOwnerMu.Unlock()
+}
+
+// releaseCaptureStream frees an admission slot when the SSE client disconnects.
+// Capture data remains available until explicit teardown.
+func releaseCaptureStream(captureID string) {
+	if captureID == "" {
+		return
+	}
+	captureOwnerMu.Lock()
+	delete(activeCaptureStreams, captureID)
+	captureOwnerMu.Unlock()
+}
+
+func activeCaptureSessionCount() int {
 	captureOwnerMu.Lock()
 	defer captureOwnerMu.Unlock()
-	return captureOwners[captureID]
+	return len(activeCaptureStreams)
+}
+
+func storedCaptureSessionCount() int {
+	captureOwnerMu.Lock()
+	defer captureOwnerMu.Unlock()
+	return len(captureOwners)
+}
+
+func releaseAllCaptureStreamsForAuth(authSessionID string) int {
+	if authSessionID == "" {
+		return 0
+	}
+	captureOwnerMu.Lock()
+	defer captureOwnerMu.Unlock()
+	n := 0
+	for cid, owner := range captureOwners {
+		if owner == authSessionID {
+			if _, active := activeCaptureStreams[cid]; active {
+				delete(activeCaptureStreams, cid)
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func assertCaptureOwner(captureID, authSessionID string) bool {
@@ -58,6 +105,16 @@ func purgeCaptureSessions(authSessionID string) []string {
 }
 
 func teardownCaptureSession(captureID string) {
+	if sess, ok := pcap.Get(captureID); ok && sess.S3Enabled() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		_, _ = sess.FinalizeS3(ctx)
+		cancel()
+	}
+	if captureGraph != nil && captureGraph.Enabled() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		_ = captureGraph.DeleteCapture(ctx, captureID)
+		cancel()
+	}
 	pcap.Delete(captureID)
 	ai.DropScrubber(captureID)
 	chatHistMu.Lock()
@@ -75,5 +132,13 @@ func teardownCaptureSession(captureID string) {
 	aiSessionsMu.Unlock()
 	captureOwnerMu.Lock()
 	delete(captureOwners, captureID)
+	delete(activeCaptureStreams, captureID)
 	captureOwnerMu.Unlock()
+}
+
+var captureGraph *GraphStore
+
+// SetCaptureGraph wires the Neo4j store for session teardown cleanup.
+func SetCaptureGraph(g *GraphStore) {
+	captureGraph = g
 }
