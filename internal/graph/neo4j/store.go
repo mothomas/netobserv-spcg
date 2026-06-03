@@ -7,6 +7,8 @@ import (
 	"log"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/netobserv/spcg/internal/graph/tenantcrypto"
@@ -70,8 +72,9 @@ func Open(ctx context.Context) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	attempts := envInt("NEO4J_CONNECT_ATTEMPTS", 10)
 	var lastErr error
-	for attempt := 0; attempt < 30; attempt++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 		if err := driver.VerifyConnectivity(ctx); err != nil {
 			lastErr = err
 			time.Sleep(2 * time.Second)
@@ -82,7 +85,11 @@ func Open(ctx context.Context) (*Store, error) {
 	}
 	if lastErr != nil {
 		_ = driver.Close(ctx)
-		return nil, fmt.Errorf("neo4j connectivity: %w", lastErr)
+		if envBool("NEO4J_REQUIRED", false) {
+			return nil, fmt.Errorf("neo4j connectivity: %w", lastErr)
+		}
+		log.Printf("neo4j connectivity failed after %d attempts, graph features disabled: %v", attempts, lastErr)
+		return &Store{}, nil
 	}
 	master := os.Getenv("GRAPH_MASTER_KEY")
 	return &Store{driver: driver, key: []byte(master)}, nil
@@ -373,6 +380,27 @@ func namespaceFor(topo pcap.FlowTopology, id string) string {
 func envOr(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func envInt(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func envBool(k string, def bool) bool {
+	if v := os.Getenv(k); v != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off":
+			return false
+		}
 	}
 	return def
 }
