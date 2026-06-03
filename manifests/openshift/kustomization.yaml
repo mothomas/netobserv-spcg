@@ -1,11 +1,10 @@
-# OpenShift base: Routes, privileged SCC, ClusterIP UI, Neo4j PVC, current images.
+# OpenShift base: Routes, privileged SCC, ClusterIP UI, Neo4j (emptyDir on small).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../base
   - rbac-capture.yaml
   - route-openshift.yaml
-  - neo4j-pvc.yaml
 images:
   - name: docker.io/mothomas/spcg-backend-engine
     newName: docker.io/mothomas/spcg-backend-engine
@@ -19,14 +18,4 @@ images:
 patches:
   - path: patches/service-frontend-clusterip.yaml
   - path: patches/tolerations.yaml
-  - target:
-      kind: Deployment
-      name: spcg-neo4j
-      namespace: pcap-frontend
-    patch: |-
-      - op: replace
-        path: /spec/template/spec/volumes
-        value:
-          - name: data
-            persistentVolumeClaim:
-              claimName: spcg-neo4j-data
+  - path: patches/neo4j-pod-security.yaml

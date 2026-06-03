@@ -1,4 +1,4 @@
-# OpenShift Small tier (Routes + SCC + Neo4j PVC + small-20260614 images).
+# OpenShift Small tier (Routes + SCC + Neo4j emptyDir + small-20260614 images).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:

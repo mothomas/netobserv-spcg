@@ -9,6 +9,8 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  # Set to your cluster default StorageClass if PVC stays Pending, e.g. gp3-csi or ocs-storagecluster-ceph-rbd
+  # storageClassName: ""
   resources:
     requests:
       storage: 10Gi

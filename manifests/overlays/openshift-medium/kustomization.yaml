@@ -1,9 +1,21 @@
-# OpenShift Medium tier — HA UI, S3 required, higher admission caps.
+# OpenShift Medium tier — HA UI, S3 required, Neo4j PVC, higher admission caps.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../openshift-small
+  - ../../openshift/neo4j-pvc.yaml
 patches:
   - path: patch-admission.yaml
   - path: patch-replicas.yaml
   - path: patch-ui-portal-resources.yaml
+  - target:
+      kind: Deployment
+      name: spcg-neo4j
+      namespace: pcap-frontend
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes
+        value:
+          - name: data
+            persistentVolumeClaim:
+              claimName: spcg-neo4j-data

@@ -1,0 +1,15 @@
+# OpenShift restricted PSS: ensure neo4j can write /data (emptyDir or PVC).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-neo4j
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 7474
+        fsGroupChangePolicy: OnRootMismatch

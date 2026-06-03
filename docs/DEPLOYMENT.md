@@ -213,7 +213,8 @@ OpenShift uses the same **base workloads** as vanilla Kubernetes (including **Ne
 |--------------|---------|
 | `openshift/rbac-capture.yaml` | `pcap-executor` RBAC + **SCC `privileged`** binding |
 | `openshift/route-openshift.yaml` | Routes `spcg` (UI) and `spcg-api` (`/api`, 5m HAProxy timeout for SSE) |
-| `openshift/neo4j-pvc.yaml` | **10Gi** `ReadWriteOnce` PVC `spcg-neo4j-data` (graph persistence) |
+| `openshift/patches/neo4j-pod-security.yaml` | `fsGroup: 7474` for restricted PSS (Small uses **emptyDir**) |
+| `openshift/neo4j-pvc.yaml` | **10Gi** PVC — applied on **openshift-medium/peak** only (not small) |
 | `openshift/patches/service-frontend-clusterip.yaml` | Removes NodePort; Routes provide ingress |
 | `openshift/patches/tolerations.yaml` | control-plane / master / Cilium tolerations (incl. **Neo4j**) |
 | `openshift/kustomization.yaml` | Image tags **`small-20260614`** for all three SPCG images |
