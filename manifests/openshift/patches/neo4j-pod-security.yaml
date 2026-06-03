@@ -1,4 +1,5 @@
-# OpenShift restricted PSS: ensure neo4j can write /data (emptyDir or PVC).
+# OpenShift restricted-v2: do not pin uid/fsGroup 7474 (not in namespace SCC ranges).
+# Let the admission controller assign runAsUser/fsGroup; emptyDir /data stays writable via fsGroupChangePolicy.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,5 +12,4 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-        fsGroup: 7474
         fsGroupChangePolicy: OnRootMismatch

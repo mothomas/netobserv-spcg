@@ -54,8 +54,7 @@ spec:
           image: neo4j:5.26-community
           imagePullPolicy: IfNotPresent
           securityContext:
-            runAsUser: 7474
-            runAsGroup: 7474
+            # Omit runAsUser/runAsGroup so OpenShift restricted SCC can assign namespace UID range.
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities:
