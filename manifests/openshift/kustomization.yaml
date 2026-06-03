@@ -16,6 +16,19 @@ images:
     newName: docker.io/mothomas/spcg-frontend
     newTag: small-20260614
 patches:
-  - path: patches/service-frontend-clusterip.yaml
   - path: patches/tolerations.yaml
   - path: patches/neo4j-pod-security.yaml
+  - target:
+      kind: Service
+      name: spcg-frontend
+      namespace: pcap-frontend
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: ClusterIP
+      - op: replace
+        path: /spec/ports
+        value:
+          - name: http
+            port: 80
+            targetPort: 3000
