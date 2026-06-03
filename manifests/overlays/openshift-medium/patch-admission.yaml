@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spcg-capture-admission
+  namespace: pcap-frontend
+data:
+  MAX_CONCURRENT_SESSIONS: "5"
+  MAX_PODS_PER_SESSION: "15"
+  MAX_CAPTURE_DURATION: "30m"
+  MAX_CAPTURE_BYTES: "104857600"
+  S3_OFFLOAD_ENABLED: "true"

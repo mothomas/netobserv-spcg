@@ -49,11 +49,12 @@ cd frontend && npm install && npm run dev
 
 | Profile | Command |
 |---------|---------|
-| Vanilla Kubernetes (default) | `kubectl apply -k manifests/` |
-| **Small** (default tier) | `kubectl apply -k manifests/overlays/small` |
+| **Small** (vanilla K8s) | `kubectl apply -k manifests/overlays/small` |
 | **Medium** | `kubectl apply -k manifests/overlays/medium` |
 | **Peak** | `kubectl apply -k manifests/overlays/peak` |
-| **OpenShift** (Route + SCC) | `kubectl apply -k manifests/openshift/` |
+| **OpenShift Small** | `oc apply -k manifests/overlays/openshift-small` |
+| **OpenShift Medium** | `oc apply -k manifests/overlays/openshift-medium` |
+| **OpenShift Peak** | `oc apply -k manifests/overlays/openshift-peak` |
 
 Vanilla UI: **http://\<node-ip\>:30080** (NodePort). OpenShift: `oc get route -n pcap-frontend`.
 

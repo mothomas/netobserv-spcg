@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-neo4j
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      containers:
+        - name: neo4j
+          env:
+            - name: NEO4J_server_memory_heap_initial__size
+              value: 1G
+            - name: NEO4J_server_memory_heap_max__size
+              value: 2G
+            - name: NEO4J_dbms_memory_pagecache_size
+              value: 1G
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 4Gi

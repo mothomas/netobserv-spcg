@@ -23,6 +23,8 @@ metadata:
   namespace: pcap-frontend
   labels:
     app: spcg-ui-portal
+  annotations:
+    haproxy.router.openshift.io/timeout: 5m
 spec:
   path: /api
   to:

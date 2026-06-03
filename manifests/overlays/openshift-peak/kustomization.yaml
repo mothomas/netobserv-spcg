@@ -1,0 +1,10 @@
+# OpenShift Peak tier — scale-out UI/engine, HPA, larger Neo4j.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../openshift-medium
+  - hpa-frontend.yaml
+patches:
+  - path: patch-admission.yaml
+  - path: patch-replicas.yaml
+  - path: patch-neo4j-resources.yaml

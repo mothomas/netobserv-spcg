@@ -20,13 +20,18 @@ manifests/
 ├── kubernetes/                 # Vanilla K8s: RBAC, NodePort, image tags
 │   ├── rbac-capture-k8s.yaml
 │   └── patches/
-├── openshift/                  # Routes + privileged SCC binding (no tiers)
+├── openshift/                  # Routes, SCC, Neo4j PVC, ClusterIP UI, image tags
 │   ├── rbac-capture.yaml
-│   └── route-openshift.yaml
+│   ├── route-openshift.yaml
+│   ├── neo4j-pvc.yaml
+│   └── patches/
 ├── overlays/
-│   ├── small/                  # Default tier image tags
-│   ├── medium/                 # HA + S3 required + resources
-│   └── peak/                   # More replicas, engine=2, HPA
+│   ├── small/                  # Vanilla K8s small tier
+│   ├── medium/
+│   ├── peak/
+│   ├── openshift-small/        # OpenShift small (Routes + Neo4j PVC)
+│   ├── openshift-medium/
+│   └── openshift-peak/
 └── demo-traffic/               # Optional lab ping workload
 
 deploy/
@@ -41,11 +46,12 @@ charts/spcg/                    # Helm alternative (OpenShift-oriented)
 
 | Profile | Command |
 |---------|---------|
-| Vanilla K8s (default kubernetes layer) | `kubectl apply -k manifests/` |
-| **Small** tier | `kubectl apply -k manifests/overlays/small` |
-| **Medium** tier | `kubectl apply -k manifests/overlays/medium` |
-| **Peak** tier | `kubectl apply -k manifests/overlays/peak` |
-| **OpenShift** (base + Route + SCC) | `kubectl apply -k manifests/openshift/` |
+| **Small** (vanilla K8s) | `kubectl apply -k manifests/overlays/small` |
+| **Medium** | `kubectl apply -k manifests/overlays/medium` |
+| **Peak** | `kubectl apply -k manifests/overlays/peak` |
+| **OpenShift Small** | `oc apply -k manifests/overlays/openshift-small` |
+| **OpenShift Medium** | `oc apply -k manifests/overlays/openshift-medium` |
+| **OpenShift Peak** | `oc apply -k manifests/overlays/openshift-peak` |
 
 ---
 
@@ -152,9 +158,9 @@ Enforced in Go: `internal/capture/admission/limits.go` at capture stream start.
 
 | Component | Small overlay | kubernetes layer (if no overlay) |
 |-----------|---------------|----------------------------------|
-| `spcg-ui-portal` | `small-20260611` | `latest` (rewrite) |
-| `spcg-frontend` | `small-20260613` | `latest` |
-| `spcg-backend-engine` | (from kubernetes) `stream-fix-20260601` | same |
+| `spcg-ui-portal` | `small-20260614` | `latest` (rewrite) |
+| `spcg-frontend` | `small-20260614` | `latest` |
+| `spcg-backend-engine` | (from kubernetes) `stream-fix-20260601` / `small-20260614` on OpenShift | same |
 
 **Release practice:** bump tags in `manifests/overlays/small/kustomization.yaml` (and rebuild/push images). Verify with:
 
@@ -190,27 +196,40 @@ kubectl kustomize manifests/overlays/small | grep 'image:'
 
 ## 5. OpenShift deployment
 
-### 5.1 Apply base OpenShift layer
+OpenShift uses the same **base workloads** as vanilla Kubernetes (including **Neo4j**, admission ConfigMap, and graph secrets) plus Routes, privileged SCC binding, ClusterIP frontend Service, and a **Neo4j PVC**.
 
-```bash
-oc apply -k manifests/openshift/
-```
+### 5.1 Apply commands
 
-This deploys **base workloads** plus:
+| Tier | Command |
+|------|---------|
+| **Small** (default) | `oc apply -k manifests/overlays/openshift-small` |
+| **Medium** | `oc apply -k manifests/overlays/openshift-medium` |
+| **Peak** | `oc apply -k manifests/overlays/openshift-peak` |
+| Base only (same as small) | `oc apply -k manifests/openshift/` |
 
-1. **Routes** (`manifests/openshift/route-openshift.yaml`)
-2. **SCC access** via ClusterRoleBinding (not a custom SCC CR)
+### 5.2 What the OpenShift layer adds
 
-### 5.2 Routes
+| File / patch | Purpose |
+|--------------|---------|
+| `openshift/rbac-capture.yaml` | `pcap-executor` RBAC + **SCC `privileged`** binding |
+| `openshift/route-openshift.yaml` | Routes `spcg` (UI) and `spcg-api` (`/api`, 5m HAProxy timeout for SSE) |
+| `openshift/neo4j-pvc.yaml` | **10Gi** `ReadWriteOnce` PVC `spcg-neo4j-data` (graph persistence) |
+| `openshift/patches/service-frontend-clusterip.yaml` | Removes NodePort; Routes provide ingress |
+| `openshift/patches/tolerations.yaml` | control-plane / master / Cilium tolerations (incl. **Neo4j**) |
+| `openshift/kustomization.yaml` | Image tags **`small-20260614`** for all three SPCG images |
+
+Neo4j remains **ClusterIP-only** (bolt `:7687`); ui-portal connects via `NEO4J_URI` from base `deployment-frontend.yaml`.
+
+### 5.3 Routes
 
 | Route | Service | Path | TLS |
 |-------|---------|------|-----|
 | `spcg` | `spcg-frontend` | `/` | edge, redirect HTTP |
-| `spcg-api` | `spcg-ui-portal` | `/api` | edge |
+| `spcg-api` | `spcg-ui-portal` | `/api` | edge, **5m timeout** (SSE capture stream) |
 
-**Why two routes:** Next.js can serve UI on `/` while API can be pinned to Go portal for large SSE payloads; also supports splitting TLS policies later.
+**Why two routes:** Next.js serves UI on `/` while API can be pinned to Go portal for large SSE payloads; also supports splitting TLS policies later.
 
-### 5.3 Security Context Constraints (SCC)
+### 5.4 Security Context Constraints (SCC)
 
 SPCG does **not** ship a custom `SecurityContextConstraints` object. It uses the platform **`privileged`** SCC through RBAC:
 
@@ -246,11 +265,11 @@ oc adm policy who-can use scc privileged -n pcap-capture
 
 **Hardening note (TODO):** netobserv supports **capabilities-only** profiles on some platforms (`CAP_BPF`, `NET_ADMIN`, `PERFMON`). Moving off `privileged` requires manifest + SCC changes and regression testing — do not drop privileged without validating sensor start.
 
-### 5.4 DNS network policy (OpenShift)
+### 5.5 DNS network policy (OpenShift)
 
 `allow-dns-egress` includes namespace `openshift-dns` (UDP 5353) in addition to `kube-system` (UDP 53). Required for ui-portal to resolve `spcg-backend-engine.pcap-capture.svc` and external S3 endpoints.
 
-### 5.5 Pod Security Admission labels
+### 5.6 Pod Security Admission labels
 
 | Namespace | Label | Level |
 |-----------|-------|-------|
@@ -261,38 +280,29 @@ Defined in `namespace-capture.yaml` / `namespace-frontend.yaml`.
 
 ---
 
-## 6. Combining OpenShift with tier overlays
+## 6. OpenShift tier overlays
 
-Tier overlays today assume the **`kubernetes/`** layer (NodePort patch, vanilla RBAC). OpenShift uses **`base` + openshift RBAC** only.
+Same admission/replica semantics as vanilla tiers; inherit from `manifests/openshift/` instead of `manifests/kubernetes/`.
 
-**Recommended patterns:**
+| Overlay path | Equivalent to |
+|--------------|---------------|
+| `overlays/openshift-small` | OpenShift base + small images |
+| `overlays/openshift-medium` | + HA UI, S3 required, ui-portal resources |
+| `overlays/openshift-peak` | + engine×2, frontend HPA, **Neo4j heap 2G / pagecache 1G** |
 
-1. **OpenShift + Small admission (manual)**  
-   - `oc apply -k manifests/openshift/`  
-   - Patch ConfigMap: `oc patch cm spcg-capture-admission -n pcap-frontend --type merge -f manifests/overlays/small/...`  
-   - Set images via `oc set image deployment/...`
-
-2. **Custom kustomization (GitOps)** — create e.g. `manifests/openshift-overlays/production/kustomization.yaml`:
-
-```yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - ../../openshift
-  - ../../overlays/medium   # only if you add openshift-compatible medium root
-patches:
-  - path: patch-route-host.yaml
-```
-
-3. **Helm** — `charts/spcg/` for teams standardizing on Helm + OpenShift values.
-
-**Do not** blindly `kubectl apply -k overlays/peak` on OpenShift without checking NodePort patches and SCC bindings.
+Peak Neo4j patch: `overlays/openshift-peak/patch-neo4j-resources.yaml`.
 
 ---
 
-## 7. Network policy map
+## 7. Combining OpenShift with tier overlays (legacy note)
 
-### 7.1 `pcap-capture` (ingress-focused)
+Tier overlays under `manifests/overlays/openshift-*` **replace** the manual merge workflow documented earlier. Use those paths directly.
+
+---
+
+## 8. Network policy map
+
+### 8.1 `pcap-capture` (ingress-focused)
 
 | Policy | Effect |
 |--------|--------|
@@ -300,7 +310,7 @@ patches:
 | `allow-frontend-to-backend-engine` | ui-portal → engine **TCP 8443** |
 | `allow-sensor-to-backend-collector` | **TCP 19000–19999** (hostNetwork + sensor pods) |
 
-### 7.2 `pcap-frontend` (egress-focused)
+### 8.2 `pcap-frontend` (egress-focused)
 
 | Policy | Effect |
 |--------|--------|
@@ -316,7 +326,7 @@ patches:
 
 ---
 
-## 8. Secrets and configuration
+## 9. Secrets and configuration
 
 | Secret | Namespace | Keys | Required |
 |--------|-----------|------|----------|
@@ -332,7 +342,7 @@ patches:
 
 ---
 
-## 9. Dynamic resources (not in base kustomize)
+## 10. Dynamic resources (not in base kustomize)
 
 Created at runtime by `spcg-backend-engine` / sensor manager:
 
@@ -343,7 +353,7 @@ Cleaned up when capture ends (delete DS).
 
 ---
 
-## 10. Build and publish images
+## 11. Build and publish images
 
 See [ci-cd.md](./ci-cd.md). Typical local build:
 
@@ -357,7 +367,7 @@ Override sensor image at engine runtime: `NETOBSERV_AGENT_IMAGE` env (if wired i
 
 ---
 
-## 11. Post-deploy verification
+## 12. Post-deploy verification
 
 ```bash
 kubectl get pods -n pcap-capture
@@ -372,7 +382,7 @@ Login → start short capture → confirm sensor DS → observability API return
 
 ---
 
-## 12. Related documents
+## 13. Related documents
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — data flows and design rationale
 - [architecture-tiers.md](./architecture-tiers.md) — sizing tables and roadmap
