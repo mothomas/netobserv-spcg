@@ -1,0 +1,14 @@
+# Extra login-page diagnostics and middleware proxy logging (remove in prod if noisy).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-frontend
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      containers:
+        - name: frontend
+          env:
+            - name: SPCG_TROUBLESHOOT
+              value: "true"

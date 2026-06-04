@@ -73,6 +73,21 @@ export type LoginResponse = {
 };
 
 import { apiUrl } from "./apiBase";
+import { isTroubleshootMode, ts, type TroubleshootEntry } from "./troubleshoot";
+
+let troubleshootTrace: TroubleshootEntry[] = [];
+
+export function getTroubleshootTrace(): TroubleshootEntry[] {
+  return [...troubleshootTrace];
+}
+
+function trace(step: string, detail?: string) {
+  const entry = { at: ts(), step, detail };
+  troubleshootTrace = [...troubleshootTrace.slice(-40), entry];
+  if (isTroubleshootMode()) {
+    console.info("[spcg-ui]", step, detail ?? "");
+  }
+}
 
 export { apiUrl } from "./apiBase";
 
@@ -89,14 +104,20 @@ export function setPublicApiBase(base: string): void {
 }
 
 export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
-  // First call always same-origin so Next.js can proxy to ui-portal before public_api_base is known.
-  const res = await fetch("/api/v1/auth/config", { cache: "no-store", credentials: "include" });
-  if (!res.ok) throw new Error(await res.text());
-  const cfg = (await res.json()) as AuthConfigResponse;
+  const url = apiUrl("/api/v1/auth/config");
+  trace("fetchAuthConfig", url);
+  const res = await fetch(url, { cache: "no-store", credentials: "include" });
+  const bodyText = await res.text();
+  trace("fetchAuthConfig response", `${res.status} len=${bodyText.length}`);
+  if (!res.ok) throw new Error(bodyText || `HTTP ${res.status}`);
+  const cfg = JSON.parse(bodyText) as AuthConfigResponse;
   if (cfg.public_api_base) {
     const here = typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "";
     const api = cfg.public_api_base.replace(/\/$/, "");
-    if (here && api !== here) setPublicApiBase(api);
+    if (here && api !== here) {
+      setPublicApiBase(api);
+      trace("setPublicApiBase", api);
+    }
   }
   return cfg;
 }

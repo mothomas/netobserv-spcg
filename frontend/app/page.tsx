@@ -9,7 +9,9 @@ import { Sidebar, type AppSection } from "@/components/layout/Sidebar";
 import { type CaptureSummary, type FlowTopology } from "@/lib/ai";
 import { emptyTopology, normalizeTopology } from "@/lib/topology";
 import { fetchGraphTopology, normalizeSigmaGraph, type SigmaGraph } from "@/lib/graph";
+import { TroubleshootPanel } from "@/components/TroubleshootPanel";
 import { isKubeconfigAuthMode, isOpenShiftAuthMode } from "@/lib/authMode";
+import { isTroubleshootMode } from "@/lib/troubleshoot";
 import {
   fetchNamespaces,
   fetchWorkloads,
@@ -22,6 +24,7 @@ import {
   type NamespaceRow,
   type NamespaceWorkloads,
   type PodDetail,
+  getTroubleshootTrace,
   loginWithKubeconfig,
   fetchAuthConfig,
   setPublicApiBase,
@@ -62,6 +65,7 @@ type PodMetrics = {
 export default function Home() {
   const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [troubleshootTrace, setTroubleshootTrace] = useState<ReturnType<typeof getTroubleshootTrace>>([]);
   const [kubeconfigText, setKubeconfigText] = useState("");
   const [session, setSession] = useState<LoginResponse | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
@@ -157,7 +161,10 @@ export default function Home() {
           `${e instanceof Error ? e.message : String(e)} — check spcg-frontend and spcg-ui-portal pods and Route spcg.`
         )
       )
-      .finally(() => setAuthLoading(false));
+      .finally(() => {
+        setAuthLoading(false);
+        if (isTroubleshootMode()) setTroubleshootTrace(getTroubleshootTrace());
+      });
   }, []);
 
   useEffect(() => {
@@ -648,6 +655,16 @@ export default function Home() {
           {authLoading && <p className="text-sm text-siem-muted">Loading sign-in options…</p>}
           {authConfig && !authConfig.methods.includes("kubeconfig") && !authConfig.openshift && loginError && (
             <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
+          )}
+          {isTroubleshootMode() && (
+            <TroubleshootPanel
+              authConfig={authConfig}
+              authLoading={authLoading}
+              loginError={loginError}
+              trace={troubleshootTrace}
+              openshiftLogin={openshiftLogin}
+              kubeconfigLogin={kubeconfigLogin}
+            />
           )}
         </div>
       </main>
