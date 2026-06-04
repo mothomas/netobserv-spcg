@@ -22,7 +22,9 @@ import {
   type NamespaceWorkloads,
   type PodDetail,
   loginWithKubeconfig,
-  loginWithToken,
+  fetchAuthConfig,
+  startOpenShiftLogin,
+  takePendingOpenShiftLogin,
   logout,
   teardownCapture,
   downloadCapturePod,
@@ -31,7 +33,7 @@ import {
   releaseAllCaptureStreams,
   releaseCaptureStream,
   openS3Export,
-  type AuthMode,
+  type AuthConfigResponse,
   type LoginResponse,
   type S3CaptureConfig,
   type S3ExportInfo,
@@ -55,8 +57,7 @@ type PodMetrics = {
 };
 
 export default function Home() {
-  const [authMode, setAuthMode] = useState<AuthMode>("kubeconfig");
-  const [token, setToken] = useState("");
+  const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null);
   const [kubeconfigText, setKubeconfigText] = useState("");
   const [session, setSession] = useState<LoginResponse | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
@@ -117,22 +118,38 @@ export default function Home() {
     [sessionId]
   );
 
-  const login = useCallback(async () => {
+  const finishLogin = useCallback(async (auth: LoginResponse) => {
+    setSession(auth);
+    const ns = await fetchNamespaces(auth.session_id);
+    setNamespaces(ns);
+    setLoggedIn(true);
+  }, []);
+
+  const loginWithKubeconfigForm = useCallback(async () => {
     setLoginError(null);
     try {
-      const auth =
-        authMode === "kubeconfig"
-          ? await loginWithKubeconfig(kubeconfigText)
-          : await loginWithToken(token);
-      setSession(auth);
-      const ns = await fetchNamespaces(auth.session_id);
-      setNamespaces(ns);
-      setLoggedIn(true);
+      const auth = await loginWithKubeconfig(kubeconfigText);
+      await finishLogin(auth);
     } catch (e) {
       setLoginError(e instanceof Error ? e.message : String(e));
       throw e;
     }
-  }, [authMode, token, kubeconfigText]);
+  }, [kubeconfigText, finishLogin]);
+
+  useEffect(() => {
+    fetchAuthConfig()
+      .then(setAuthConfig)
+      .catch((e) => setLoginError(e instanceof Error ? e.message : String(e)));
+  }, []);
+
+  useEffect(() => {
+    const pending = takePendingOpenShiftLogin();
+    if (!pending) return;
+    setLoginError(null);
+    finishLogin(pending).catch((e) => {
+      setLoginError(e instanceof Error ? e.message : String(e));
+    });
+  }, [finishLogin]);
 
   const resetLocalState = useCallback(() => {
     abortRef.current?.abort();
@@ -156,7 +173,6 @@ export default function Home() {
     setLoggedIn(false);
     setWorkspaceReady(false);
     setKubeconfigText("");
-    setToken("");
   }, [session, resetLocalState]);
 
   const endCaptureSession = useCallback(async () => {
@@ -552,26 +568,30 @@ export default function Home() {
             </div>
           </div>
           <p className="text-siem-muted text-sm mb-4">
-            Connect with kubeconfig or bearer token. Credentials remain in session memory only and are wiped on sign out.
+            {authConfig?.methods.includes("openshift")
+              ? "Sign in with your OpenShift account. Access follows your cluster RoleBindings."
+              : "Upload a kubeconfig for your Kubernetes cluster. Credentials stay in session memory only and are wiped on sign out."}
           </p>
-          <div className="flex gap-2 mb-4">
+          {authConfig?.openshift?.authorize_path && (
             <button
               type="button"
-              className={authMode === "kubeconfig" ? "fluent-tab-active" : "fluent-tab-inactive"}
-              onClick={() => setAuthMode("kubeconfig")}
+              className="w-full siem-btn-primary py-2.5 mb-4"
+              onClick={() => {
+                setLoginError(null);
+                startOpenShiftLogin(authConfig.openshift!.authorize_path);
+              }}
             >
-              Kubeconfig
+              Sign in with OpenShift
             </button>
-            <button
-              type="button"
-              className={authMode === "token" ? "fluent-tab-active" : "fluent-tab-inactive"}
-              onClick={() => setAuthMode("token")}
-            >
-              Bearer token
-            </button>
-          </div>
-          {authMode === "kubeconfig" ? (
+          )}
+          {loginError && authConfig?.openshift && !authConfig.methods.includes("kubeconfig") && (
+            <p className="mb-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
+          )}
+          {authConfig?.methods.includes("kubeconfig") && (
             <>
+              {authConfig?.openshift && (
+                <p className="text-xs text-siem-muted mb-2 text-center">— or use kubeconfig (lab / break-glass) —</p>
+              )}
               <input
                 type="file"
                 accept=".yaml,.yml,.config"
@@ -590,19 +610,27 @@ export default function Home() {
                 value={kubeconfigText}
                 onChange={(e) => setKubeconfigText(e.target.value)}
               />
+              {loginError && <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>}
+              <button
+                type="button"
+                className="mt-4 w-full fluent-tab-inactive py-2.5 border border-siem-border"
+                onClick={() => loginWithKubeconfigForm().catch(() => undefined)}
+              >
+                Sign in with kubeconfig
+              </button>
             </>
-          ) : (
-            <textarea
-              className="siem-input h-28 font-mono text-sm"
-              placeholder="Bearer token"
-              value={token}
-              onChange={(e) => setToken(e.target.value.trim())}
-            />
           )}
-          {loginError && <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>}
-          <button className="mt-4 w-full siem-btn-primary py-2.5" onClick={() => login().catch(() => undefined)}>
-            Sign in
-          </button>
+          {!authConfig && !loginError && (
+            <p className="text-sm text-siem-muted">Loading sign-in options…</p>
+          )}
+          {authConfig && !authConfig.methods.includes("kubeconfig") && !authConfig.openshift && loginError && (
+            <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
+          )}
+          {authConfig && authConfig.methods.includes("openshift") && !authConfig.openshift && (
+            <p className="mt-3 text-sm text-siem-err">
+              OpenShift login is enabled but OAuth is not configured on the portal (OAUTH_CLIENT_ID).
+            </p>
+          )}
         </div>
       </main>
     );

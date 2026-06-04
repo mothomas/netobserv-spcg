@@ -1,0 +1,14 @@
+# Vanilla Kubernetes: kubeconfig file login only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-ui-portal
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      containers:
+        - name: ui-portal
+          env:
+            - name: SPCG_AUTH_METHODS
+              value: kubeconfig

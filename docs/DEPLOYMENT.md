@@ -2,6 +2,8 @@
 
 This document describes **what gets deployed**, how **Kustomize layers** compose, and how to run on **vanilla Kubernetes** vs **OpenShift** (including SCC).
 
+For the **future secure namespace layout and phased rollout**, see [SECURE-ARCHITECTURE-PLAN.md](./SECURE-ARCHITECTURE-PLAN.md).
+
 ---
 
 ## 1. Manifest repository layout

@@ -1,0 +1,30 @@
+# OpenShift: OAuth login only (no bearer token in UI). Set URLs to match your Routes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-ui-portal
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      containers:
+        - name: ui-portal
+          env:
+            - name: SPCG_AUTH_METHODS
+              value: openshift
+            - name: SPCG_FRONTEND_URL
+              value: https://spcg.apps.example.com
+            - name: OAUTH_AUTHORIZE_URL
+              value: https://oauth-openshift.apps.example.com/oauth/authorize
+            - name: OAUTH_TOKEN_URL
+              value: https://oauth-openshift.apps.example.com/oauth/token
+            - name: OAUTH_REDIRECT_URL
+              value: https://spcg-api.apps.example.com/api/v1/auth/openshift/callback
+            - name: OAUTH_CLIENT_ID
+              value: spcg-ui
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-oauth-client
+                  key: client-secret
+                  optional: true

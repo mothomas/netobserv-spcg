@@ -17,3 +17,4 @@ images:
 patches:
   - path: patches/control-plane-tolerations.yaml
   - path: patches/nodeport-frontend.yaml
+  - path: patches/ui-portal-auth-vanilla.yaml

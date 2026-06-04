@@ -8,8 +8,9 @@ For full deployment topology see **[DEPLOYMENT.md](./DEPLOYMENT.md)** and **[ARC
 
 | Feature | Vanilla Kubernetes | OpenShift |
 |---------|-------------------|-----------|
-| User auth (kubeconfig upload) | Yes | Yes |
-| User auth (bearer token) | Yes | Yes (OAuth token) |
+| User auth (kubeconfig upload) | Yes (default) | Optional break-glass if `kubeconfig` in `SPCG_AUTH_METHODS` |
+| User auth (OpenShift OAuth) | No | Yes (default `SPCG_AUTH_METHODS=openshift`) |
+| User auth (bearer token paste) | Dev only if env unset | Disabled on OpenShift overlay |
 | Namespace / workload listing | Yes (RBAC-scoped) | Yes |
 | Owner-based capture | Yes | Yes |
 | netobserv eBPF sensors | Yes (privileged or CAP_BPF) | Yes (SCC `privileged` binding) |

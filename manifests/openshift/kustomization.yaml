@@ -11,14 +11,15 @@ images:
     newTag: small-20260614
   - name: docker.io/mothomas/spcg-ui-portal
     newName: docker.io/mothomas/spcg-ui-portal
-    newTag: small-20260615
+    newTag: small-20260616
   - name: docker.io/mothomas/spcg-frontend
     newName: docker.io/mothomas/spcg-frontend
-    newTag: small-20260614
+    newTag: small-20260616
 patches:
   - path: patches/tolerations.yaml
   - path: patches/neo4j-pod-security.yaml
   - path: patches/ui-portal-neo4j-wait.yaml
+  - path: patches/ui-portal-auth-openshift.yaml
   - target:
       kind: Service
       name: spcg-frontend

@@ -64,7 +64,7 @@ export type S3ExportInfo = {
   upload_done: boolean;
 };
 
-export type AuthMode = "token" | "kubeconfig";
+export type AuthMode = "kubeconfig";
 
 export type LoginResponse = {
   session_id: string;
@@ -72,21 +72,41 @@ export type LoginResponse = {
   cluster?: string;
 };
 
+export type AuthConfigResponse = {
+  methods: string[];
+  openshift?: { authorize_path: string };
+};
+
+export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
+  const res = await fetch("/api/v1/auth/config", { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Redirect browser to OpenShift OAuth (same-origin API route). */
+export function startOpenShiftLogin(authorizePath: string): void {
+  const path = authorizePath.startsWith("/") ? authorizePath : `/${authorizePath}`;
+  window.location.href = path;
+}
+
+/** After OAuth callback stored session in sessionStorage. */
+export function takePendingOpenShiftLogin(): LoginResponse | null {
+  if (typeof window === "undefined") return null;
+  const raw = sessionStorage.getItem("spcg_pending_auth");
+  if (!raw) return null;
+  sessionStorage.removeItem("spcg_pending_auth");
+  try {
+    return JSON.parse(raw) as LoginResponse;
+  } catch {
+    return null;
+  }
+}
+
 export function authHeaders(sessionId: string): HeadersInit {
   return {
     "X-SPCG-Session": sessionId,
     "Content-Type": "application/json",
   };
-}
-
-export async function loginWithToken(token: string): Promise<LoginResponse> {
-  const res = await fetch("/api/v1/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "token", token }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
 }
 
 function kubeconfigPayload(content: string): string {

@@ -6,7 +6,7 @@ resources:
 images:
   - name: docker.io/mothomas/spcg-ui-portal
     newName: docker.io/mothomas/spcg-ui-portal
-    newTag: small-20260615
+    newTag: small-20260616
   - name: docker.io/mothomas/spcg-frontend
     newName: docker.io/mothomas/spcg-frontend
-    newTag: small-20260614
+    newTag: small-20260616

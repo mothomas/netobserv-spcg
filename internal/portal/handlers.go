@@ -47,8 +47,11 @@ var (
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/auth/config", s.handleAuthConfig)
 	mux.HandleFunc("/api/v1/auth/login", s.handleAuthLogin)
 	mux.HandleFunc("/api/v1/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("/api/v1/auth/openshift/authorize", s.handleOpenShiftAuthorize)
+	mux.HandleFunc("/api/v1/auth/openshift/callback", s.handleOpenShiftCallback)
 	mux.HandleFunc("/api/v1/namespaces", s.handleNamespaces)
 	mux.HandleFunc("/api/v1/namespaces/", s.handleNamespaceSubresource)
 	mux.HandleFunc("/api/v1/workloads", s.handleWorkloads)
@@ -127,7 +130,16 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	var sess *auth.Session
 	var clusterHost string
 
-	switch strings.ToLower(body.Mode) {
+	mode := strings.ToLower(strings.TrimSpace(body.Mode))
+	if mode == "token" {
+		mode = string(auth.ModeBearer)
+	}
+	if !auth.MethodAllowed(mode) {
+		http.Error(w, fmt.Sprintf("login mode %q is not enabled on this deployment", body.Mode), http.StatusForbidden)
+		return
+	}
+
+	switch mode {
 	case "kubeconfig", "kube", "config":
 		kc, err := auth.DecodeKubeconfigUpload(body.Kubeconfig)
 		if err != nil {
@@ -150,7 +162,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		auth.Wipe(kc)
-	default:
+	case string(auth.ModeBearer), "token":
 		if body.Token == "" {
 			http.Error(w, "token is required for bearer mode", http.StatusBadRequest)
 			return
@@ -169,6 +181,9 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	default:
+		http.Error(w, fmt.Sprintf("unsupported login mode %q", body.Mode), http.StatusBadRequest)
+		return
 	}
 
 	writeJSON(w, map[string]string{

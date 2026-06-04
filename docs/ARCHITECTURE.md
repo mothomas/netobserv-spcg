@@ -2,6 +2,8 @@
 
 Secure Packet Capture Gateway (SPCG) is a **namespace-scoped, zero-trust** observability product that wraps [netobserv-cli](https://github.com/netobserv/netobserv-cli) / [netobserv-ebpf-agent](https://github.com/netobserv/netobserv-ebpf-agent) with a browser UI, admission-controlled captures, and optional graph + AI triage.
 
+**Target hardened layout** (landing / control / capture split, K8s gateway, ephemeral sensors only): [SECURE-ARCHITECTURE-PLAN.md](./SECURE-ARCHITECTURE-PLAN.md).
+
 ---
 
 ## 1. Design ideology
