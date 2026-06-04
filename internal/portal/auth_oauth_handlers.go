@@ -32,14 +32,24 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, ok, err := auth.ResolveOAuthSettings(r.Context())
 	if err != nil {
 		osCfg["error"] = err.Error()
+		if base := auth.IngressBaseURL(r); base != "" {
+			osCfg["authorize_url"] = base + "/api/v1/auth/openshift/authorize"
+			osCfg["redirect_hint"] = base + "/api/v1/auth/openshift/callback"
+		}
 		out["openshift"] = osCfg
 		writeJSON(w, out)
 		return
 	}
 	if ok {
-		if cfg.PublicAPIBase != "" {
-			out["public_api_base"] = cfg.PublicAPIBase
-			osCfg["authorize_url"] = cfg.PublicAPIBase + "/api/v1/auth/openshift/authorize"
+		uiBase := strings.TrimSuffix(cfg.FrontendURL, "/")
+		apiBase := strings.TrimSuffix(cfg.PublicAPIBase, "/")
+		if apiBase != "" && apiBase != uiBase {
+			out["public_api_base"] = apiBase
+			osCfg["authorize_url"] = apiBase + "/api/v1/auth/openshift/authorize"
+		} else if uiBase != "" {
+			osCfg["authorize_url"] = uiBase + "/api/v1/auth/openshift/authorize"
+		} else if base := auth.IngressBaseURL(r); base != "" {
+			osCfg["authorize_url"] = base + "/api/v1/auth/openshift/authorize"
 		}
 		out["openshift"] = osCfg
 	}

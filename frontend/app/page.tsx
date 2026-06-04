@@ -60,6 +60,7 @@ type PodMetrics = {
 
 export default function Home() {
   const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [kubeconfigText, setKubeconfigText] = useState("");
   const [session, setSession] = useState<LoginResponse | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
@@ -141,11 +142,21 @@ export default function Home() {
   useEffect(() => {
     fetchAuthConfig()
       .then((cfg) => {
-        if (cfg.public_api_base) setPublicApiBase(cfg.public_api_base);
         setAuthConfig(cfg);
-        if (cfg.openshift?.error) setLoginError(cfg.openshift.error);
+        if (cfg.openshift?.error) {
+          setLoginError(
+            `${cfg.openshift.error} Ensure Route spcg exists, OAuth secret spcg-oauth-client is set, and portal SA can read Routes.`
+          );
+        } else {
+          setLoginError(null);
+        }
       })
-      .catch((e) => setLoginError(e instanceof Error ? e.message : String(e)));
+      .catch((e) =>
+        setLoginError(
+          `${e instanceof Error ? e.message : String(e)} — check spcg-frontend and spcg-ui-portal pods and Route spcg.`
+        )
+      )
+      .finally(() => setAuthLoading(false));
   }, []);
 
   useEffect(() => {
@@ -582,13 +593,12 @@ export default function Home() {
             <button
               type="button"
               className="w-full siem-btn-primary py-2.5 mb-4"
-              disabled={!authConfig.openshift?.authorize_url && !authConfig.openshift?.authorize_path}
               onClick={() => {
                 setLoginError(null);
-                if (!authConfig.openshift) return;
+                const os = authConfig?.openshift;
                 startOpenShiftLogin(
-                  authConfig.openshift.authorize_path,
-                  authConfig.openshift.authorize_url
+                  os?.authorize_path || "/api/v1/auth/openshift/authorize",
+                  os?.authorize_url
                 );
               }}
             >
@@ -631,16 +641,9 @@ export default function Home() {
               </button>
             </>
           )}
-          {!authConfig && !loginError && (
-            <p className="text-sm text-siem-muted">Loading sign-in options…</p>
-          )}
+          {authLoading && <p className="text-sm text-siem-muted">Loading sign-in options…</p>}
           {authConfig && !authConfig.methods.includes("kubeconfig") && !authConfig.openshift && loginError && (
             <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
-          )}
-          {authConfig?.methods.includes("openshift") && !authConfig.openshift?.authorize_path && (
-            <p className="mt-3 text-sm text-siem-err">
-              OpenShift login is enabled but OAuth is not configured on the portal (set OAUTH_CLIENT_ID and URLs).
-            </p>
           )}
         </div>
       </main>

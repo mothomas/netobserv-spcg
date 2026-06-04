@@ -32,22 +32,23 @@ func DiscoverOpenShiftRoutes(ctx context.Context, spcgNS string) (authorizeURL, 
 	if err != nil {
 		return "", "", "", "", "", fmt.Errorf("oauth route: %w", err)
 	}
-	apiHost, err := routeHTTPSHost(ctx, cfg, spcgNS, "spcg-api")
-	if err != nil {
-		return "", "", "", "", "", fmt.Errorf("spcg-api route: %w", err)
-	}
 	uiHost, err := routeHTTPSHost(ctx, cfg, spcgNS, "spcg")
 	if err != nil {
 		return "", "", "", "", "", fmt.Errorf("spcg route: %w", err)
+	}
+	// Prefer dedicated API route when present; otherwise single-host (Argo CD–style) UI route + Next /api proxy.
+	publicAPIBase = uiHost
+	if apiHost, err := routeHTTPSHost(ctx, cfg, spcgNS, "spcg-api"); err == nil {
+		publicAPIBase = apiHost
 	}
 	authorizeURL = oauthHost + "/oauth/authorize"
 	tokenURL = internalOAuthTokenURL
 	if override := strings.TrimSpace(os.Getenv("OAUTH_TOKEN_URL")); override != "" {
 		tokenURL = override
 	}
-	redirectURL = apiHost + "/api/v1/auth/openshift/callback"
+	// OAuth callback on UI host so one Route is enough; Next.js proxies /api to ui-portal.
+	redirectURL = uiHost + "/api/v1/auth/openshift/callback"
 	frontendURL = uiHost
-	publicAPIBase = apiHost
 	return authorizeURL, tokenURL, redirectURL, frontendURL, publicAPIBase, nil
 }
 
@@ -149,6 +150,25 @@ func ResolveOAuthSettings(ctx context.Context) (OAuthSettings, bool, error) {
 	if err := cfg.Valid(); err != nil {
 		return OAuthSettings{}, true, err
 	}
+	if publicAPI == "" && cfg.FrontendURL != "" {
+		publicAPI = cfg.FrontendURL
+	}
 	cfg.PublicAPIBase = publicAPI
 	return cfg, true, nil
+}
+
+// IngressBaseURL builds https://host from a proxied HTTP request (fallback when Route discovery fails).
+func IngressBaseURL(r *http.Request) string {
+	if r == nil || r.Host == "" {
+		return ""
+	}
+	proto := "https"
+	if r.TLS == nil {
+		if p := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); p != "" {
+			proto = p
+		} else {
+			proto = "http"
+		}
+	}
+	return proto + "://" + strings.TrimSuffix(r.Host, "/")
 }

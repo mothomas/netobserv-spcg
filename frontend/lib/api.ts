@@ -89,9 +89,16 @@ export function setPublicApiBase(base: string): void {
 }
 
 export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
-  const res = await apiFetch("/api/v1/auth/config", { cache: "no-store", credentials: "include" });
+  // First call always same-origin so Next.js can proxy to ui-portal before public_api_base is known.
+  const res = await fetch("/api/v1/auth/config", { cache: "no-store", credentials: "include" });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const cfg = (await res.json()) as AuthConfigResponse;
+  if (cfg.public_api_base) {
+    const here = typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "";
+    const api = cfg.public_api_base.replace(/\/$/, "");
+    if (here && api !== here) setPublicApiBase(api);
+  }
+  return cfg;
 }
 
 /** Redirect browser to OpenShift OAuth (use spcg-api Route when configured). */
