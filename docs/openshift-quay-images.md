@@ -2,13 +2,15 @@
 
 Use **quay.io/moby/** repositories (adjust org if your Quay namespace differs).
 
-## 1. Create repositories on Quay
+## 1. Create repositories on Quay (required before first push)
 
-Create public repos (or private + pull secret):
+On [quay.io](https://quay.io) → organization **moby** → **Create repository** (public), for each:
 
-- `moby/spcg-frontend`
-- `moby/spcg-ui-portal`
-- `moby/spcg-backend-engine`
+- `spcg-frontend`
+- `spcg-ui-portal`
+- `spcg-backend-engine`
+
+Grant robot **`moby+robo`** *Write* (or Admin) on all three. Without this, `docker push` returns **401 UNAUTHORIZED**.
 
 ## 2. Push from your workstation
 

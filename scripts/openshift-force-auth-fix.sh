@@ -3,7 +3,7 @@
 set -euo pipefail
 NS="${NS:-pcap-frontend}"
 PORTAL_IMAGE="${PORTAL_IMAGE:-quay.io/moby/spcg-ui-portal:small-20260624}"
-FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260624}"
+FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260625}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if ! oc get secret spcg-quay -n "$NS" &>/dev/null; then
