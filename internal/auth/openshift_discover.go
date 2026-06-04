@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	oauthRouteNS  = "openshift-authentication"
+	oauthRouteNS   = "openshift-authentication"
 	oauthRouteName = "oauth-openshift"
-	internalOAuthTokenURL = "https://oauth.openshift.svc.cluster.local/oauth/token"
+	// Legacy in-cluster name; not present on all OCP builds (DNS NXDOMAIN). Prefer oauth-openshift Route host.
+	legacyInternalOAuthTokenURL = "https://oauth.openshift.svc.cluster.local/oauth/token"
 )
 
 // DiscoverOpenShiftRoutes fills OAuth/UI URLs from OpenShift Route objects (Argo CD–style; no user-entered domain).
@@ -42,9 +43,12 @@ func DiscoverOpenShiftRoutes(ctx context.Context, spcgNS string) (authorizeURL, 
 		publicAPIBase = apiHost
 	}
 	authorizeURL = oauthHost + "/oauth/authorize"
-	tokenURL = internalOAuthTokenURL
+	// Same host as authorize (matches openshift.default.svc/.well-known/oauth-authorization-server).
+	tokenURL = oauthHost + "/oauth/token"
 	if override := strings.TrimSpace(os.Getenv("OAUTH_TOKEN_URL")); override != "" {
 		tokenURL = override
+	} else if useLegacy := strings.TrimSpace(os.Getenv("OAUTH_TOKEN_URL_LEGACY_INTERNAL")); useLegacy == "true" || useLegacy == "1" {
+		tokenURL = legacyInternalOAuthTokenURL
 	}
 	// OAuth callback on UI host so one Route is enough; Next.js proxies /api to ui-portal.
 	redirectURL = uiHost + "/api/v1/auth/openshift/callback"
@@ -124,7 +128,7 @@ func ResolveOAuthSettings(ctx context.Context) (OAuthSettings, bool, error) {
 	}
 	publicAPI := strings.TrimSuffix(strings.TrimSpace(os.Getenv("SPCG_PUBLIC_API_BASE")), "/")
 
-	needDiscover := cfg.AuthorizeURL == "" || cfg.RedirectURL == "" || cfg.FrontendURL == "" || publicAPI == ""
+	needDiscover := cfg.AuthorizeURL == "" || cfg.TokenURL == "" || cfg.RedirectURL == "" || cfg.FrontendURL == "" || publicAPI == ""
 	if needDiscover {
 		authz, tok, redir, front, apiBase, derr := DiscoverOpenShiftRoutes(ctx, "")
 		if derr == nil {

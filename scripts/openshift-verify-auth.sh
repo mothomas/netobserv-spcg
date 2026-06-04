@@ -20,7 +20,10 @@ else
 fi
 
 echo ""
-echo "=== Route spcg (Argo CD 'url' equivalent) ==="
+echo "=== OAuth token URL (portal must reach this on :443) ==="
+OAUTH_TOKEN_URL="$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='https://{.spec.host}/oauth/token' 2>/dev/null || true)"
+echo "  route: ${OAUTH_TOKEN_URL:-<oauth-openshift route not found>}"
+oc set env deployment/spcg-ui-portal -n "$NS" --list 2>/dev/null | grep '^OAUTH_TOKEN_URL=' || echo "  (OAUTH_TOKEN_URL not set on portal — discovery may use broken oauth.openshift.svc on old images)"
 UI_HOST=$(oc get route spcg -n "$NS" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)
 if [ -n "$UI_HOST" ]; then
   echo "  UI: $UI_HOST"

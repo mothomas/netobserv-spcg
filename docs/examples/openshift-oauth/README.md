@@ -6,7 +6,7 @@ SPCG mirrors [Argo CD OpenShift SSO](https://github.com/argoproj/argo-cd/blob/ma
 |---|---------|------|
 | External URL | `argocd-cm` → `url` | Route **`spcg`** |
 | Callback | `/api/dex/callback` | `/api/v1/auth/openshift/callback` |
-| Token URL | Internal OAuth service | `https://oauth.openshift.svc.cluster.local/oauth/token` |
+| Token URL | Route `oauth-openshift` (discovered in-cluster) | `https://<oauth-openshift-route>/oauth/token` |
 
 See [ARGO-CD-PARITY.md](./ARGO-CD-PARITY.md) for a full mapping.
 
@@ -94,7 +94,8 @@ No OAuthClient required; UI shows file upload / paste kubeconfig again.
 | `ImagePullBackOff` / `toomanyrequests` | Cluster still on **docker.io** — apply overlay with **quay.io/moby** images ([openshift-quay-images.md](../../openshift-quay-images.md)) |
 | `No sign-in methods` | `SPCG_AUTH_METHODS=openshift` missing on **spcg-frontend** |
 | OAuth redirect mismatch | Redirect URI in OAuthClient ≠ discovered callback URL |
-| Login timeout to OAuth (Argo [#12599](https://github.com/argoproj/argo-cd/issues/12599)) | Egress/proxy to `oauth-openshift`; token uses in-cluster `oauth.openshift.svc` |
+| `lookup oauth.openshift.svc.cluster.local: no such host` on login | Set `OAUTH_TOKEN_URL` from route: `oc get route oauth-openshift -n openshift-authentication -o jsonpath='https://{.spec.host}/oauth/token'` then `oc set env deployment/spcg-ui-portal -n pcap-frontend OAUTH_TOKEN_URL=<url>`; or run `./scripts/openshift-force-auth-fix.sh` |
+| Login timeout to OAuth (Argo [#12599](https://github.com/argoproj/argo-cd/issues/12599)) | Egress to `oauth-openshift` route on :443 (NetworkPolicy allows); optional `OAUTH_TLS_INSECURE_SKIP_VERIFY=true` |
 
 ```bash
 bash scripts/openshift-force-auth-fix.sh

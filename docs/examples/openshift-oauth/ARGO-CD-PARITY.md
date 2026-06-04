@@ -8,7 +8,7 @@ Argo CD on OpenShift uses **Dex** with an **openshift** connector ([Dex docs](ht
 | Dex callback `/api/dex/callback` | Portal callback `/api/v1/auth/openshift/callback` (proxied by Next.js `/api/*`) |
 | `OAuthClient` / SA redirect URI **must match exactly** | Same — register UI host + callback path |
 | Authorize: `oauth-openshift` Route `/oauth/authorize` | Same (discovered in-cluster) |
-| Token: internal `oauth.openshift.svc` (Dex) | Same: `https://oauth.openshift.svc.cluster.local/oauth/token` |
+| Token: internal `oauth.openshift.svc` (Dex) | Route host: `https://<oauth-openshift-route>/oauth/token` (override with `OAUTH_TOKEN_URL`; legacy `oauth.openshift.svc` absent on many clusters) |
 | `clientID` + `clientSecret` in `argocd-secret` | `OAUTH_CLIENT_ID` + secret **`spcg-oauth-client`** |
 | `grantMethod: auto` on OAuthClient | Recommended for UI login |
 | Optional `insecureCA: true` (Dex) | `OAUTH_TLS_INSECURE_SKIP_VERIFY=true` on portal if needed |

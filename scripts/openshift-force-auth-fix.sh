@@ -17,9 +17,20 @@ oc set image "deployment/spcg-ui-portal" -n "$NS" "ui-portal=${PORTAL_IMAGE}"
 oc set image "deployment/spcg-frontend" -n "$NS" "frontend=${FRONTEND_IMAGE}"
 
 echo "Setting auth env (in case patches were skipped)..."
+OAUTH_TOKEN_URL="$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='https://{.spec.host}/oauth/token' 2>/dev/null || true)"
+if [ -z "$OAUTH_TOKEN_URL" ] || [ "$OAUTH_TOKEN_URL" = "https:///oauth/token" ]; then
+  echo "WARN: could not read route oauth-openshift; set OAUTH_TOKEN_URL manually on spcg-ui-portal"
+else
+  echo "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}"
+fi
 oc set env "deployment/spcg-frontend" -n "$NS" "SPCG_AUTH_METHODS=openshift"
-oc set env "deployment/spcg-ui-portal" -n "$NS" \
-  "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui"
+if [ -n "$OAUTH_TOKEN_URL" ] && [ "$OAUTH_TOKEN_URL" != "https:///oauth/token" ]; then
+  oc set env "deployment/spcg-ui-portal" -n "$NS" \
+    "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui" "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}"
+else
+  oc set env "deployment/spcg-ui-portal" -n "$NS" \
+    "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui"
+fi
 
 echo "Restarting (delete stuck pods if deployment UP-TO-DATE is 0)..."
 oc rollout restart "deployment/spcg-ui-portal" "deployment/spcg-frontend" -n "$NS"
