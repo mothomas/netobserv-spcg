@@ -3,6 +3,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../base
+  - config-auth-openshift.yaml
   - rbac-capture.yaml
   - rbac-portal-oauth.yaml
   - route-openshift.yaml

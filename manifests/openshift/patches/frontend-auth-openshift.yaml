@@ -9,6 +9,9 @@ spec:
     spec:
       containers:
         - name: frontend
+          envFrom:
+            - configMapRef:
+                name: spcg-auth-env
           env:
             - name: SPCG_AUTH_METHODS
               value: openshift

@@ -11,6 +11,9 @@ spec:
       automountServiceAccountToken: true
       containers:
         - name: ui-portal
+          envFrom:
+            - configMapRef:
+                name: spcg-auth-env
           env:
             - name: SPCG_AUTH_METHODS
               value: openshift
