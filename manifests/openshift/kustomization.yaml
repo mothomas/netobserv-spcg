@@ -24,7 +24,7 @@ patches:
   - path: patches/ui-portal-auth-openshift.yaml
   - path: patches/frontend-auth-openshift.yaml
   - path: patches/frontend-troubleshoot.yaml
-  - path: patches/imagepull-quay.yaml
+  - path: patches/quay-explicit-images.yaml
   - target:
       kind: Service
       name: spcg-frontend
