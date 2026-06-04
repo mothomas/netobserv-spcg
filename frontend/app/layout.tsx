@@ -11,15 +11,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     /\/$/,
     ""
   );
+  const authMethods = (process.env.SPCG_AUTH_METHODS || "").trim();
+  const boot: string[] = [];
+  if (apiBase) boot.push(`window.__SPCG_API_BASE__=${JSON.stringify(apiBase)};`);
+  if (authMethods) boot.push(`window.__SPCG_AUTH_METHODS__=${JSON.stringify(authMethods)};`);
   return (
     <html lang="en">
       <head>
-        {apiBase ? (
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `window.__SPCG_API_BASE__=${JSON.stringify(apiBase)};`,
-            }}
-          />
+        {boot.length > 0 ? (
+          <script dangerouslySetInnerHTML={{ __html: boot.join("") }} />
         ) : null}
       </head>
       <body>{children}</body>

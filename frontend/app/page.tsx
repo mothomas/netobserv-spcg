@@ -9,6 +9,7 @@ import { Sidebar, type AppSection } from "@/components/layout/Sidebar";
 import { type CaptureSummary, type FlowTopology } from "@/lib/ai";
 import { emptyTopology, normalizeTopology } from "@/lib/topology";
 import { fetchGraphTopology, normalizeSigmaGraph, type SigmaGraph } from "@/lib/graph";
+import { isKubeconfigAuthMode, isOpenShiftAuthMode } from "@/lib/authMode";
 import {
   fetchNamespaces,
   fetchWorkloads,
@@ -571,6 +572,9 @@ export default function Home() {
     }
   }, [session, sessionId]);
 
+  const openshiftLogin = isOpenShiftAuthMode(authConfig?.methods);
+  const kubeconfigLogin = isKubeconfigAuthMode(authConfig?.methods);
+
   if (!loggedIn) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6 bg-siem-bg app-shell-root">
@@ -585,11 +589,11 @@ export default function Home() {
             </div>
           </div>
           <p className="text-siem-muted text-sm mb-4">
-            {authConfig?.methods.includes("openshift")
+            {openshiftLogin
               ? "Log in with your OpenShift username and password on the cluster login page. Access follows your RoleBindings."
               : "Upload a kubeconfig for your Kubernetes cluster. Credentials stay in session memory only and are wiped on sign out."}
           </p>
-          {authConfig?.methods.includes("openshift") && (
+          {openshiftLogin && (
             <button
               type="button"
               className="w-full siem-btn-primary py-2.5 mb-4"
@@ -605,10 +609,10 @@ export default function Home() {
               Log in via OpenShift
             </button>
           )}
-          {loginError && authConfig?.methods.includes("openshift") && !authConfig.methods.includes("kubeconfig") && (
+          {loginError && openshiftLogin && !kubeconfigLogin && (
             <p className="mb-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
           )}
-          {authConfig?.methods.includes("kubeconfig") && (
+          {kubeconfigLogin && (
             <>
               {authConfig?.openshift && (
                 <p className="text-xs text-siem-muted mb-2 text-center">— or use kubeconfig (lab / break-glass) —</p>
