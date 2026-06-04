@@ -78,8 +78,15 @@ export { apiUrl } from "./apiBase";
 
 export type AuthConfigResponse = {
   methods: string[];
-  openshift?: { authorize_path: string; authorize_url?: string };
+  public_api_base?: string;
+  openshift?: { authorize_path: string; authorize_url?: string; error?: string };
 };
+
+/** Set API base at runtime after /auth/config (OpenShift Route discovery). */
+export function setPublicApiBase(base: string): void {
+  if (typeof window === "undefined" || !base) return;
+  (window as Window & { __SPCG_API_BASE__?: string }).__SPCG_API_BASE__ = base.replace(/\/$/, "");
+}
 
 export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
   const res = await apiFetch("/api/v1/auth/config", { cache: "no-store", credentials: "include" });

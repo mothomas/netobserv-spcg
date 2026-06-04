@@ -1,0 +1,56 @@
+# Lets ui-portal discover OAuth and SPCG Route hosts in-cluster (no manual domain env).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spcg-ui-portal
+  namespace: pcap-frontend
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spcg-ui-portal-route-reader
+  namespace: pcap-frontend
+rules:
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    resourceNames: ["spcg", "spcg-api"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spcg-ui-portal-route-reader
+  namespace: pcap-frontend
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spcg-ui-portal-route-reader
+subjects:
+  - kind: ServiceAccount
+    name: spcg-ui-portal
+    namespace: pcap-frontend
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spcg-ui-portal-oauth-route-reader
+  namespace: openshift-authentication
+rules:
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    resourceNames: ["oauth-openshift"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spcg-ui-portal-oauth-route-reader
+  namespace: openshift-authentication
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spcg-ui-portal-oauth-route-reader
+subjects:
+  - kind: ServiceAccount
+    name: spcg-ui-portal
+    namespace: pcap-frontend

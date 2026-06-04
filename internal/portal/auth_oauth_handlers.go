@@ -22,14 +22,24 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	out := map[string]interface{}{
 		"methods": methods,
 	}
-	if auth.MethodAllowed(string(auth.ModeOpenShift)) {
-		osCfg := map[string]string{
-			"authorize_path": "/api/v1/auth/openshift/authorize",
-		}
-		if _, ok := auth.LoadOAuthSettings(); ok {
-			if base := strings.TrimSuffix(strings.TrimSpace(os.Getenv("SPCG_PUBLIC_API_BASE")), "/"); base != "" {
-				osCfg["authorize_url"] = base + "/api/v1/auth/openshift/authorize"
-			}
+	if !auth.MethodAllowed(string(auth.ModeOpenShift)) {
+		writeJSON(w, out)
+		return
+	}
+	osCfg := map[string]string{
+		"authorize_path": "/api/v1/auth/openshift/authorize",
+	}
+	cfg, ok, err := auth.ResolveOAuthSettings(r.Context())
+	if err != nil {
+		osCfg["error"] = err.Error()
+		out["openshift"] = osCfg
+		writeJSON(w, out)
+		return
+	}
+	if ok {
+		if cfg.PublicAPIBase != "" {
+			out["public_api_base"] = cfg.PublicAPIBase
+			osCfg["authorize_url"] = cfg.PublicAPIBase + "/api/v1/auth/openshift/authorize"
 		}
 		out["openshift"] = osCfg
 	}
@@ -45,9 +55,13 @@ func (s *Server) handleOpenShiftAuthorize(w http.ResponseWriter, r *http.Request
 		http.Error(w, "openshift login is disabled", http.StatusNotFound)
 		return
 	}
-	cfg, ok := auth.LoadOAuthSettings()
+	cfg, ok, err := auth.ResolveOAuthSettings(r.Context())
 	if !ok {
-		http.Error(w, "OpenShift OAuth is not configured (set OAUTH_CLIENT_ID and related env)", http.StatusServiceUnavailable)
+		http.Error(w, "OpenShift OAuth is not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	state, err := auth.OAuthState.Issue()
@@ -72,9 +86,13 @@ func (s *Server) handleOpenShiftCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "openshift login is disabled", http.StatusNotFound)
 		return
 	}
-	cfg, ok := auth.LoadOAuthSettings()
+	cfg, ok, err := auth.ResolveOAuthSettings(r.Context())
 	if !ok {
-		http.Error(w, "OpenShift OAuth is not configured", http.StatusServiceUnavailable)
+		http.Error(w, "OpenShift OAuth is not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	if errParam := r.URL.Query().Get("error"); errParam != "" {

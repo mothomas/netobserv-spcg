@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -8,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -18,33 +18,23 @@ const ModeOpenShift = "openshift"
 
 // OAuthSettings from environment (OpenShift OAuth client).
 type OAuthSettings struct {
-	AuthorizeURL string
-	TokenURL     string
-	ClientID     string
-	ClientSecret string
-	RedirectURL  string
-	Scope        string
-	FrontendURL  string
+	AuthorizeURL  string
+	TokenURL      string
+	ClientID      string
+	ClientSecret  string
+	RedirectURL   string
+	Scope         string
+	FrontendURL   string
+	PublicAPIBase string
 }
 
+// LoadOAuthSettings returns static env-only settings (no discovery). Prefer ResolveOAuthSettings in production.
 func LoadOAuthSettings() (OAuthSettings, bool) {
-	id := strings.TrimSpace(os.Getenv("OAUTH_CLIENT_ID"))
-	if id == "" {
+	cfg, ok, err := ResolveOAuthSettings(context.Background())
+	if err != nil || !ok {
 		return OAuthSettings{}, false
 	}
-	scope := strings.TrimSpace(os.Getenv("OAUTH_SCOPE"))
-	if scope == "" {
-		scope = "user:full"
-	}
-	return OAuthSettings{
-		AuthorizeURL: strings.TrimSpace(os.Getenv("OAUTH_AUTHORIZE_URL")),
-		TokenURL:     strings.TrimSpace(os.Getenv("OAUTH_TOKEN_URL")),
-		ClientID:     id,
-		ClientSecret: strings.TrimSpace(os.Getenv("OAUTH_CLIENT_SECRET")),
-		RedirectURL:  strings.TrimSpace(os.Getenv("OAUTH_REDIRECT_URL")),
-		Scope:        scope,
-		FrontendURL:  strings.TrimSpace(os.Getenv("SPCG_FRONTEND_URL")),
-	}, true
+	return cfg, true
 }
 
 func (o OAuthSettings) Valid() error {

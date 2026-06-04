@@ -1,4 +1,4 @@
-# OpenShift: OAuth login only (no bearer token in UI). Set URLs to match your Routes.
+# OpenShift: Argo CD–style login — cluster Routes + OAuth client secret only (no domain env).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,21 +7,13 @@ metadata:
 spec:
   template:
     spec:
+      serviceAccountName: spcg-ui-portal
+      automountServiceAccountToken: true
       containers:
         - name: ui-portal
           env:
             - name: SPCG_AUTH_METHODS
               value: openshift
-            - name: SPCG_FRONTEND_URL
-              value: https://spcg.apps.example.com
-            - name: SPCG_PUBLIC_API_BASE
-              value: https://spcg-api.apps.example.com
-            - name: OAUTH_AUTHORIZE_URL
-              value: https://oauth-openshift.apps.example.com/oauth/authorize
-            - name: OAUTH_TOKEN_URL
-              value: https://oauth-openshift.apps.example.com/oauth/token
-            - name: OAUTH_REDIRECT_URL
-              value: https://spcg-api.apps.example.com/api/v1/auth/openshift/callback
             - name: OAUTH_CLIENT_ID
               value: spcg-ui
             - name: OAUTH_CLIENT_SECRET
@@ -29,4 +21,3 @@ spec:
                 secretKeyRef:
                   name: spcg-oauth-client
                   key: client-secret
-                  optional: true

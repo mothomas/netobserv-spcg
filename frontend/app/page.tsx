@@ -23,6 +23,7 @@ import {
   type PodDetail,
   loginWithKubeconfig,
   fetchAuthConfig,
+  setPublicApiBase,
   startOpenShiftLogin,
   apiUrl,
   takePendingOpenShiftLogin,
@@ -139,7 +140,11 @@ export default function Home() {
 
   useEffect(() => {
     fetchAuthConfig()
-      .then(setAuthConfig)
+      .then((cfg) => {
+        if (cfg.public_api_base) setPublicApiBase(cfg.public_api_base);
+        setAuthConfig(cfg);
+        if (cfg.openshift?.error) setLoginError(cfg.openshift.error);
+      })
       .catch((e) => setLoginError(e instanceof Error ? e.message : String(e)));
   }, []);
 
@@ -570,25 +575,27 @@ export default function Home() {
           </div>
           <p className="text-siem-muted text-sm mb-4">
             {authConfig?.methods.includes("openshift")
-              ? "Sign in with your OpenShift account. Access follows your cluster RoleBindings."
+              ? "Log in with your OpenShift username and password on the cluster login page. Access follows your RoleBindings."
               : "Upload a kubeconfig for your Kubernetes cluster. Credentials stay in session memory only and are wiped on sign out."}
           </p>
-          {authConfig?.openshift?.authorize_path && (
+          {authConfig?.methods.includes("openshift") && (
             <button
               type="button"
               className="w-full siem-btn-primary py-2.5 mb-4"
+              disabled={!authConfig.openshift?.authorize_url && !authConfig.openshift?.authorize_path}
               onClick={() => {
                 setLoginError(null);
+                if (!authConfig.openshift) return;
                 startOpenShiftLogin(
-                  authConfig.openshift!.authorize_path,
-                  authConfig.openshift!.authorize_url
+                  authConfig.openshift.authorize_path,
+                  authConfig.openshift.authorize_url
                 );
               }}
             >
-              Sign in with OpenShift
+              Log in via OpenShift
             </button>
           )}
-          {loginError && authConfig?.openshift && !authConfig.methods.includes("kubeconfig") && (
+          {loginError && authConfig?.methods.includes("openshift") && !authConfig.methods.includes("kubeconfig") && (
             <p className="mb-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
           )}
           {authConfig?.methods.includes("kubeconfig") && (
