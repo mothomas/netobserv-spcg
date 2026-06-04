@@ -72,21 +72,28 @@ export type LoginResponse = {
   cluster?: string;
 };
 
+import { apiUrl } from "./apiBase";
+
+export { apiUrl } from "./apiBase";
+
 export type AuthConfigResponse = {
   methods: string[];
-  openshift?: { authorize_path: string };
+  openshift?: { authorize_path: string; authorize_url?: string };
 };
 
 export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
-  const res = await fetch("/api/v1/auth/config", { cache: "no-store" });
+  const res = await apiFetch("/api/v1/auth/config", { cache: "no-store", credentials: "include" });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-/** Redirect browser to OpenShift OAuth (same-origin API route). */
-export function startOpenShiftLogin(authorizePath: string): void {
-  const path = authorizePath.startsWith("/") ? authorizePath : `/${authorizePath}`;
-  window.location.href = path;
+/** Redirect browser to OpenShift OAuth (use spcg-api Route when configured). */
+export function startOpenShiftLogin(authorizePath: string, authorizeUrl?: string): void {
+  if (authorizeUrl) {
+    window.location.href = authorizeUrl;
+    return;
+  }
+  window.location.href = apiUrl(authorizePath.startsWith("/") ? authorizePath : `/${authorizePath}`);
 }
 
 /** After OAuth callback stored session in sessionStorage. */
@@ -109,6 +116,10 @@ export function authHeaders(sessionId: string): HeadersInit {
   };
 }
 
+export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(apiUrl(path), { ...init, credentials: init?.credentials ?? "include" });
+}
+
 function kubeconfigPayload(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) return "";
@@ -120,7 +131,7 @@ function kubeconfigPayload(content: string): string {
 }
 
 export async function loginWithKubeconfig(content: string): Promise<LoginResponse> {
-  const res = await fetch("/api/v1/auth/login", {
+  const res = await apiFetch("/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode: "kubeconfig", kubeconfig: kubeconfigPayload(content) }),
@@ -130,7 +141,7 @@ export async function loginWithKubeconfig(content: string): Promise<LoginRespons
 }
 
 export async function logout(sessionId: string): Promise<void> {
-  await fetch("/api/v1/auth/logout", {
+  await apiFetch("/api/v1/auth/logout", {
     method: "POST",
     headers: authHeaders(sessionId),
   });
@@ -138,7 +149,7 @@ export async function logout(sessionId: string): Promise<void> {
 
 /** Wipes capture PCAP/AI state; auth session remains until logout. */
 export async function teardownCapture(authSessionId: string, captureSessionId: string): Promise<void> {
-  const res = await fetch(`/api/v1/capture/teardown/${captureSessionId}`, {
+  const res = await apiFetch(`/api/v1/capture/teardown/${captureSessionId}`, {
     method: "POST",
     headers: authHeaders(authSessionId),
   });
@@ -147,7 +158,7 @@ export async function teardownCapture(authSessionId: string, captureSessionId: s
 
 /** Release a live ingest stream slot without deleting captured data (after Stop capture). */
 export async function releaseCaptureStream(authSessionId: string, captureSessionId: string): Promise<void> {
-  const res = await fetch(`/api/v1/capture/release-stream/${encodeURIComponent(captureSessionId)}`, {
+  const res = await apiFetch(`/api/v1/capture/release-stream/${encodeURIComponent(captureSessionId)}`, {
     method: "POST",
     headers: authHeaders(authSessionId),
   });
@@ -156,7 +167,7 @@ export async function releaseCaptureStream(authSessionId: string, captureSession
 
 /** Release all stuck stream slots for this login session. */
 export async function releaseAllCaptureStreams(authSessionId: string): Promise<number> {
-  const res = await fetch("/api/v1/capture/release-all-streams", {
+  const res = await apiFetch("/api/v1/capture/release-all-streams", {
     method: "POST",
     headers: authHeaders(authSessionId),
   });
@@ -189,7 +200,7 @@ export async function downloadCapturePod(
   podUid: string,
   podName?: string
 ): Promise<void> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/v1/capture/download/${encodeURIComponent(captureSessionId)}?pod_uid=${encodeURIComponent(podUid)}`,
     { headers: { "X-SPCG-Session": authSessionId } }
   );
@@ -209,7 +220,7 @@ export async function fetchCaptureLimits(authSessionId: string): Promise<{
   };
   active_capture_count: number;
 }> {
-  const res = await fetch("/api/v1/capture/limits", {
+  const res = await apiFetch("/api/v1/capture/limits", {
     headers: { "X-SPCG-Session": authSessionId },
   });
   if (!res.ok) throw new Error(await res.text());
@@ -231,7 +242,7 @@ export async function fetchCaptureObservability(
   authSessionId: string,
   captureSessionId: string
 ): Promise<CaptureObservabilityResponse> {
-  const res = await fetch("/api/v1/capture/observability", {
+  const res = await apiFetch("/api/v1/capture/observability", {
     method: "POST",
     headers: authHeaders(authSessionId),
     body: JSON.stringify({ capture_session_id: captureSessionId, session_id: captureSessionId }),
@@ -242,7 +253,7 @@ export async function fetchCaptureObservability(
 
 /** Verify S3 bucket credentials before starting an S3-backed capture. */
 export async function testS3Capture(authSessionId: string, cfg: S3CaptureConfig): Promise<void> {
-  const res = await fetch("/api/v1/capture/s3/test", {
+  const res = await apiFetch("/api/v1/capture/s3/test", {
     method: "POST",
     headers: authHeaders(authSessionId),
     body: JSON.stringify({ ...cfg, enabled: true }),
@@ -252,7 +263,7 @@ export async function testS3Capture(authSessionId: string, cfg: S3CaptureConfig)
 
 /** Fetch a fresh presigned URL for the merged PCAP object in S3. */
 export async function fetchS3ExportInfo(authSessionId: string, captureSessionId: string): Promise<S3ExportInfo> {
-  const res = await fetch(`/api/v1/capture/s3/${encodeURIComponent(captureSessionId)}`, {
+  const res = await apiFetch(`/api/v1/capture/s3/${encodeURIComponent(captureSessionId)}`, {
     headers: { "X-SPCG-Session": authSessionId },
   });
   if (!res.ok) throw new Error(await res.text());
@@ -269,7 +280,7 @@ export async function openS3Export(authSessionId: string, captureSessionId: stri
 
 /** Download merged PCAP for all pods in the capture session. */
 export async function downloadCaptureMerged(authSessionId: string, captureSessionId: string): Promise<void> {
-  const res = await fetch(`/api/v1/capture/merge/${encodeURIComponent(captureSessionId)}`, {
+  const res = await apiFetch(`/api/v1/capture/merge/${encodeURIComponent(captureSessionId)}`, {
     headers: { "X-SPCG-Session": authSessionId },
   });
   if (!res.ok) throw new Error(await res.text());
@@ -287,7 +298,7 @@ export async function downloadCaptureMerged(authSessionId: string, captureSessio
 }
 
 export async function fetchNamespaces(sessionId: string): Promise<NamespaceRow[]> {
-  const res = await fetch("/api/v1/namespaces", { headers: authHeaders(sessionId) });
+  const res = await apiFetch("/api/v1/namespaces", { headers: authHeaders(sessionId) });
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
   if (!Array.isArray(data)) throw new Error("unexpected namespaces response");
@@ -305,7 +316,7 @@ function normalizeWorkloads(data: NamespaceWorkloads[]): NamespaceWorkloads[] {
 }
 
 export async function fetchWorkloads(sessionId: string, namespaces: string[]): Promise<NamespaceWorkloads[]> {
-  const res = await fetch("/api/v1/workloads", {
+  const res = await apiFetch("/api/v1/workloads", {
     method: "POST",
     headers: authHeaders(sessionId),
     body: JSON.stringify({ namespaces }),

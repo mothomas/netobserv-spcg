@@ -14,6 +14,8 @@ spec:
               value: openshift
             - name: SPCG_FRONTEND_URL
               value: https://spcg.apps.example.com
+            - name: SPCG_PUBLIC_API_BASE
+              value: https://spcg-api.apps.example.com
             - name: OAUTH_AUTHORIZE_URL
               value: https://oauth-openshift.apps.example.com/oauth/authorize
             - name: OAUTH_TOKEN_URL

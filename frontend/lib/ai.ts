@@ -1,4 +1,4 @@
-import { authHeaders, type S3ExportInfo } from "./api";
+import { apiFetch, authHeaders, type S3ExportInfo } from "./api";
 
 export type AIProvider =
   | "openai"
@@ -224,7 +224,7 @@ export async function verifyAI(
     test_llm?: boolean;
   }
 ): Promise<AIVerifyResponse> {
-  const res = await fetch("/api/v1/ai/verify", {
+  const res = await apiFetch("/api/v1/ai/verify", {
     method: "POST",
     headers: authHeaders(authSessionId),
     body: aiBody(authSessionId, captureSessionId, opts),
@@ -238,7 +238,7 @@ export async function fetchAIContext(
   captureSessionId: string,
   maxLines = 400
 ): Promise<AIContextResponse> {
-  const res = await fetch("/api/v1/ai/context", {
+  const res = await apiFetch("/api/v1/ai/context", {
     method: "POST",
     headers: authHeaders(authSessionId),
     body: aiBody(authSessionId, captureSessionId, { max_lines: maxLines }),
@@ -261,7 +261,7 @@ export async function sendAIChat(
     flush_session?: boolean;
   }
 ): Promise<AIChatResponse> {
-  const res = await fetch("/api/v1/ai/chat", {
+  const res = await apiFetch("/api/v1/ai/chat", {
     method: "POST",
     headers: authHeaders(authSessionId),
     body: aiBody(authSessionId, captureSessionId, body),

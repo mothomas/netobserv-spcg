@@ -1,0 +1,14 @@
+# Browser calls spcg-api Route directly (OAuth + /api/v1). Set to: oc get route spcg-api -o jsonpath='https://{.spec.host}'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-frontend
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      containers:
+        - name: frontend
+          env:
+            - name: SPCG_PUBLIC_API_BASE
+              value: https://spcg-api.apps.example.com

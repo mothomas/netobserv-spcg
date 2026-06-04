@@ -24,6 +24,7 @@ import {
   loginWithKubeconfig,
   fetchAuthConfig,
   startOpenShiftLogin,
+  apiUrl,
   takePendingOpenShiftLogin,
   logout,
   teardownCapture,
@@ -338,7 +339,7 @@ export default function Home() {
 
     let res: Response;
     try {
-      res = await fetch("/api/v1/capture/stream", {
+      res = await fetch(apiUrl("/api/v1/capture/stream"), {
         method: "POST",
         headers: authHeaders(session.session_id),
         body: JSON.stringify({
@@ -578,7 +579,10 @@ export default function Home() {
               className="w-full siem-btn-primary py-2.5 mb-4"
               onClick={() => {
                 setLoginError(null);
-                startOpenShiftLogin(authConfig.openshift!.authorize_path);
+                startOpenShiftLogin(
+                  authConfig.openshift!.authorize_path,
+                  authConfig.openshift!.authorize_url
+                );
               }}
             >
               Sign in with OpenShift
@@ -626,9 +630,9 @@ export default function Home() {
           {authConfig && !authConfig.methods.includes("kubeconfig") && !authConfig.openshift && loginError && (
             <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
           )}
-          {authConfig && authConfig.methods.includes("openshift") && !authConfig.openshift && (
+          {authConfig?.methods.includes("openshift") && !authConfig.openshift?.authorize_path && (
             <p className="mt-3 text-sm text-siem-err">
-              OpenShift login is enabled but OAuth is not configured on the portal (OAUTH_CLIENT_ID).
+              OpenShift login is enabled but OAuth is not configured on the portal (set OAUTH_CLIENT_ID and URLs).
             </p>
           )}
         </div>

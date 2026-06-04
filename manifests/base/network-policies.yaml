@@ -139,6 +139,8 @@ spec:
               app: spcg-ui-portal
       ports:
         - protocol: TCP
+          port: 80
+        - protocol: TCP
           port: 8080
 ---
 # ui-portal must reach the API server from the user's uploaded kubeconfig (any cluster).

@@ -1,5 +1,5 @@
 import type { EdgeDetail } from "@/lib/ai";
-import { authHeaders } from "@/lib/api";
+import { apiFetch, authHeaders } from "@/lib/api";
 
 export type SigmaNode = {
   id: string;
@@ -37,7 +37,7 @@ export async function fetchGraphTopology(
   authSessionId: string,
   captureSessionId: string
 ): Promise<SigmaGraph> {
-  const res = await fetch("/api/v1/graph/topology", {
+  const res = await apiFetch("/api/v1/graph/topology", {
     method: "POST",
     headers: {
       ...authHeaders(authSessionId),

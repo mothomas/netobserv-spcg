@@ -23,11 +23,15 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 		"methods": methods,
 	}
 	if auth.MethodAllowed(string(auth.ModeOpenShift)) {
+		osCfg := map[string]string{
+			"authorize_path": "/api/v1/auth/openshift/authorize",
+		}
 		if _, ok := auth.LoadOAuthSettings(); ok {
-			out["openshift"] = map[string]string{
-				"authorize_path": "/api/v1/auth/openshift/authorize",
+			if base := strings.TrimSuffix(strings.TrimSpace(os.Getenv("SPCG_PUBLIC_API_BASE")), "/"); base != "" {
+				osCfg["authorize_url"] = base + "/api/v1/auth/openshift/authorize"
 			}
 		}
+		out["openshift"] = osCfg
 	}
 	writeJSON(w, out)
 }

@@ -1,10 +1,31 @@
 # OpenShift OAuth for SPCG UI
 
-Create an OAuth client and secret before enabling `SPCG_AUTH_METHODS=openshift` on `spcg-ui-portal`.
+## 1. Discover your Route hosts
 
-## 1. OAuthClient (cluster admin)
+```bash
+UI_HOST=$(oc get route spcg -n pcap-frontend -o jsonpath='https://{.spec.host}')
+API_HOST=$(oc get route spcg-api -n pcap-frontend -o jsonpath='https://{.spec.host}')
+OAUTH_HOST=$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='https://{.spec.host}' 2>/dev/null || echo "https://oauth-openshift.apps.$(oc cluster-info | sed -n 's/.*apps\.\([^ ]*\).*/\1/p')")
 
-Adjust `redirectURIs` to match your API Route host (`OAUTH_REDIRECT_URL` in `manifests/openshift/patches/ui-portal-auth-openshift.yaml`).
+echo "UI_HOST=$UI_HOST"
+echo "API_HOST=$API_HOST"
+echo "OAUTH_HOST=$OAUTH_HOST"
+```
+
+Edit these files and replace `apps.example.com` placeholders:
+
+- `manifests/openshift/patches/ui-portal-auth-openshift.yaml`
+- `manifests/openshift/patches/frontend-public-api.yaml`
+
+| Env | Value |
+|-----|--------|
+| `SPCG_FRONTEND_URL` | `$UI_HOST` |
+| `SPCG_PUBLIC_API_BASE` | `$API_HOST` |
+| `OAUTH_AUTHORIZE_URL` | `$OAUTH_HOST/oauth/authorize` |
+| `OAUTH_TOKEN_URL` | `$OAUTH_HOST/oauth/token` |
+| `OAUTH_REDIRECT_URL` | `$API_HOST/api/v1/auth/openshift/callback` |
+
+## 2. OAuthClient (cluster admin)
 
 ```yaml
 apiVersion: oauth.openshift.io/v1
@@ -13,31 +34,38 @@ metadata:
   name: spcg-ui
 grantMethod: auto
 redirectURIs:
-  - https://spcg-api.apps.example.com/api/v1/auth/openshift/callback
-secret: <generate-random-string>
+  - https://YOUR-SPCG-API-HOST/api/v1/auth/openshift/callback
+secret: <random-32-chars>
 ```
 
 ```bash
 oc apply -f oauth-client.yaml
+oc create secret generic spcg-oauth-client -n pcap-frontend \
+  --from-literal=client-secret='<same-secret>' \
+  --dry-run=client -o yaml | oc apply -f -
 ```
 
-## 2. Portal secret
+## 3. Apply and restart
 
 ```bash
-oc create secret generic spcg-oauth-client -n pcap-frontend \
-  --from-literal=client-secret='<same-as-oauth-client-secret>'
+oc apply -k manifests/overlays/openshift-small
+oc rollout restart deployment/spcg-ui-portal deployment/spcg-frontend -n pcap-frontend
 ```
 
-## 3. Patch env URLs
+## 4. Verify
 
-Edit `manifests/openshift/patches/ui-portal-auth-openshift.yaml`:
+```bash
+# Portal env
+oc exec -n pcap-frontend deploy/spcg-ui-portal -- wget -qO- http://127.0.0.1:8080/api/v1/auth/config
 
-- `SPCG_FRONTEND_URL` → UI Route URL (`spcg` Route)
-- `OAUTH_*` → your cluster OAuth host
-- `OAUTH_REDIRECT_URL` → API Route + `/api/v1/auth/openshift/callback`
+# From laptop (API route)
+curl -s "https://$(oc get route spcg-api -n pcap-frontend -o jsonpath='{.spec.host}')/api/v1/auth/config"
+```
 
-## 4. UI flow
+Expected:
 
-User clicks **Sign in with OpenShift** → cluster OAuth → callback creates session → browser lands on `/auth/callback` → app continues with `X-SPCG-Session`.
+```json
+{"methods":["openshift"],"openshift":{"authorize_path":"...","authorize_url":"https://spcg-api.../api/v1/auth/openshift/authorize"}}
+```
 
-Bearer token paste is **not** shown when `SPCG_AUTH_METHODS=openshift`. Vanilla K8s overlays use `kubeconfig` only.
+UI should show **Sign in with OpenShift** only (no bearer token, no kubeconfig when `SPCG_AUTH_METHODS=openshift`).
