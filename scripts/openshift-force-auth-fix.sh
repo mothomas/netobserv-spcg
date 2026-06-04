@@ -6,10 +6,6 @@ PORTAL_IMAGE="${PORTAL_IMAGE:-quay.io/moby/spcg-ui-portal:small-20260624}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260625}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-if ! oc get secret spcg-quay -n "$NS" &>/dev/null; then
-  echo "WARN: secret spcg-quay not found — create before pull (see docs/openshift-quay-images.md)"
-fi
-
 echo "Applying openshift-small overlay..."
 oc apply -k "${REPO_ROOT}/manifests/overlays/openshift-small"
 

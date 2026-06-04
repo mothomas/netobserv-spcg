@@ -1,58 +1,36 @@
-# Quay.io images (avoid Docker Hub rate limits)
+# Quay.io images (public — no cluster pull secret)
 
-Use **quay.io/moby/** repositories (adjust org if your Quay namespace differs).
+Images: **quay.io/moby/** (public repositories).
 
-## 1. Create repositories on Quay (required before first push)
+| Component | Image |
+|-----------|--------|
+| Frontend | `quay.io/moby/spcg-frontend:small-20260625` |
+| UI portal | `quay.io/moby/spcg-ui-portal:small-20260624` |
+| Backend | `quay.io/moby/spcg-backend-engine:small-20260614` |
 
-On [quay.io](https://quay.io) → organization **moby** → **Create repository** (public), for each:
-
-- `spcg-frontend`
-- `spcg-ui-portal`
-- `spcg-backend-engine`
-
-Grant robot **`moby+robo`** *Write* (or Admin) on all three. Without this, `docker push` returns **401 UNAUTHORIZED**.
-
-## 2. Push from your workstation
+## Push from your workstation (maintainers)
 
 ```bash
-# Login (use a robot account token — never commit tokens to git)
-docker login quay.io -u 'moby+robo' -p '<token-from-quay-robot-settings>'
-
-export QUAY=quay.io/moby
-export TAG=small-20260624
-
-docker tag docker.io/mothomas/spcg-frontend:${TAG}      ${QUAY}/spcg-frontend:${TAG}
-docker tag docker.io/mothomas/spcg-ui-portal:${TAG}     ${QUAY}/spcg-ui-portal:${TAG}
-docker tag docker.io/mothomas/spcg-backend-engine:small-20260614 ${QUAY}/spcg-backend-engine:small-20260614
-
-docker push ${QUAY}/spcg-frontend:${TAG}
-docker push ${QUAY}/spcg-ui-portal:${TAG}
-docker push ${QUAY}/spcg-backend-engine:small-20260614
+docker login quay.io -u 'moby+robo' -p '<token>'
+./scripts/push-images-quay.sh
+docker push quay.io/moby/spcg-frontend:small-20260625
 ```
 
-Or run: `./scripts/push-images-quay.sh`
+## Deploy on OpenShift
 
-## 3. OpenShift pull secret (private repos or higher limits)
-
-```bash
-oc create secret docker-registry spcg-quay \
-  -n pcap-frontend \
-  --docker-server=quay.io \
-  --docker-username='moby+robo' \
-  --docker-password='<token>' \
-  --dry-run=client -o yaml | oc apply -f -
-
-oc patch serviceaccount default -n pcap-frontend --type=merge -p \
-  '{"imagePullSecrets":[{"name":"spcg-quay"}]}'
-```
-
-## 4. Deploy
+No pull secret needed for public Quay repos.
 
 ```bash
+git pull origin main
 oc apply -k manifests/overlays/openshift-small
-PORTAL_IMAGE=quay.io/moby/spcg-ui-portal:small-20260624 \
-FRONTEND_IMAGE=quay.io/moby/spcg-frontend:small-20260624 \
-  bash scripts/openshift-force-auth-fix.sh
+oc delete pod -n pcap-frontend -l 'app in (spcg-frontend,spcg-ui-portal)'
+oc rollout status deployment/spcg-ui-portal deployment/spcg-frontend -n pcap-frontend
+```
+
+Or:
+
+```bash
+bash scripts/openshift-force-auth-fix.sh
 ```
 
 Verify:
@@ -61,3 +39,5 @@ Verify:
 oc get pods -n pcap-frontend -l app=spcg-ui-portal \
   -o jsonpath='{.items[0].spec.containers[0].image}{"\n"}'
 ```
+
+Must show `quay.io/moby/...`, not `docker.io/mothomas/...`.

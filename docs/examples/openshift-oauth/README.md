@@ -90,11 +90,11 @@ No OAuthClient required; UI shows file upload / paste kubeconfig again.
 | Symptom | Fix |
 |---------|-----|
 | `404 page not found` on `/api/v1/auth/config` | Portal image too old — use `small-20260624+`, delete stale pods |
-| `ImagePullBackOff` / `toomanyrequests` | Docker Hub pull secret — see openshift-dockerhub doc |
+| `ImagePullBackOff` / `toomanyrequests` | Cluster still on **docker.io** — apply overlay with **quay.io/moby** images ([openshift-quay-images.md](../../openshift-quay-images.md)) |
 | `No sign-in methods` | `SPCG_AUTH_METHODS=openshift` missing on **spcg-frontend** |
 | OAuth redirect mismatch | Redirect URI in OAuthClient ≠ discovered callback URL |
 | Login timeout to OAuth (Argo [#12599](https://github.com/argoproj/argo-cd/issues/12599)) | Egress/proxy to `oauth-openshift`; token uses in-cluster `oauth.openshift.svc` |
 
 ```bash
-bash scripts/openshift-force-auth-fix.sh   # after pull secret exists
+bash scripts/openshift-force-auth-fix.sh
 ```

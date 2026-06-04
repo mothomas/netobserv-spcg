@@ -1,4 +1,4 @@
-# Explicit Quay refs (avoids stale docker.io/mothomas on cluster after kustomize drift).
+# Explicit Quay refs (public repos — no imagePullSecret required).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,8 +7,6 @@ metadata:
 spec:
   template:
     spec:
-      imagePullSecrets:
-        - name: spcg-quay
       containers:
         - name: ui-portal
           image: quay.io/moby/spcg-ui-portal:small-20260624
@@ -21,8 +19,6 @@ metadata:
 spec:
   template:
     spec:
-      imagePullSecrets:
-        - name: spcg-quay
       containers:
         - name: frontend
           image: quay.io/moby/spcg-frontend:small-20260625
@@ -35,8 +31,6 @@ metadata:
 spec:
   template:
     spec:
-      imagePullSecrets:
-        - name: spcg-quay
       containers:
         - name: backend-engine
           image: quay.io/moby/spcg-backend-engine:small-20260614
