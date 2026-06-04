@@ -5,12 +5,16 @@ export function runtimeAuthMethods(): string[] {
   return raw.split(",").map((m) => m.trim().toLowerCase()).filter(Boolean);
 }
 
+/** Prefer portal /auth/config; fall back to SPCG_AUTH_METHODS injected at runtime. */
+export function effectiveAuthMethods(apiMethods?: string[] | null): string[] {
+  if (apiMethods?.length) return apiMethods;
+  return runtimeAuthMethods();
+}
+
 export function isOpenShiftAuthMode(methods?: string[] | null): boolean {
-  if (methods?.includes("openshift")) return true;
-  return runtimeAuthMethods().includes("openshift");
+  return effectiveAuthMethods(methods).includes("openshift");
 }
 
 export function isKubeconfigAuthMode(methods?: string[] | null): boolean {
-  if (methods?.includes("kubeconfig")) return true;
-  return runtimeAuthMethods().includes("kubeconfig");
+  return effectiveAuthMethods(methods).includes("kubeconfig");
 }

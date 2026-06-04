@@ -600,6 +600,9 @@ export default function Home() {
               ? "Log in with your OpenShift username and password on the cluster login page. Access follows your RoleBindings."
               : "Upload a kubeconfig for your Kubernetes cluster. Credentials stay in session memory only and are wiped on sign out."}
           </p>
+          {!authLoading && loginError && (
+            <p className="mb-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
+          )}
           {openshiftLogin && (
             <button
               type="button"
@@ -615,9 +618,6 @@ export default function Home() {
             >
               Log in via OpenShift
             </button>
-          )}
-          {loginError && openshiftLogin && !kubeconfigLogin && (
-            <p className="mb-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
           )}
           {kubeconfigLogin && (
             <>
@@ -653,8 +653,12 @@ export default function Home() {
             </>
           )}
           {authLoading && <p className="text-sm text-siem-muted">Loading sign-in options…</p>}
-          {authConfig && !authConfig.methods.includes("kubeconfig") && !authConfig.openshift && loginError && (
-            <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
+          {!authLoading && !openshiftLogin && !kubeconfigLogin && (
+            <p className="text-sm text-siem-muted">
+              No sign-in methods are configured. Set <code className="text-siem-text">SPCG_AUTH_METHODS</code> on
+              spcg-frontend and spcg-ui-portal, or fix <code className="text-siem-text">/api/v1/auth/config</code> on the
+              portal (image tag small-20260621+).
+            </p>
           )}
           {isTroubleshootMode() && (
             <TroubleshootPanel
