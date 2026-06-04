@@ -7,7 +7,8 @@ metadata:
 spec:
   template:
     spec:
-      # Default namespace SA — OpenShift grants restricted-v2 automatically (no ClusterRoleBinding).
+      # Explicit "default" overwrites stale serviceAccountName: spcg-ui-portal on oc apply.
+      serviceAccountName: default
       automountServiceAccountToken: true
       containers:
         - name: ui-portal

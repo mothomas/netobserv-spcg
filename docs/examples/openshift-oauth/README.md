@@ -89,7 +89,7 @@ No OAuthClient required; UI shows file upload / paste kubeconfig again.
 
 | Symptom | Fix |
 |---------|-----|
-| Portal deployment `0/1`, `ReplicaFailure` / `FailedCreate` | Run `oc describe rs/<newest-rs> -n pcap-frontend` — usually SCC (old deploy used custom SA) or missing `spcg-oauth-client`; `git pull` + re-apply overlay (portal uses **default** SA now) |
+| Portal deployment `0/1`, `ReplicaFailure` / `FailedCreate` | Check live SA: `oc get deploy spcg-ui-portal -n pcap-frontend -o jsonpath='{.spec.template.spec.serviceAccountName}{"\n"}'` — must be `default`, not `spcg-ui-portal`; `git pull` + re-apply, or `oc patch deploy spcg-ui-portal -n pcap-frontend --type=json -p='[{"op":"remove","path":"/spec/template/spec/serviceAccountName"}]'` then restart |
 | `404 page not found` on `/api/v1/auth/config` | Portal image too old — use `small-20260624+`, delete stale pods |
 | `ImagePullBackOff` / `toomanyrequests` | Cluster still on **docker.io** — apply overlay with **quay.io/moby** images ([openshift-quay-images.md](../../openshift-quay-images.md)) |
 | `No sign-in methods` | `SPCG_AUTH_METHODS=openshift` missing on **spcg-frontend** |
