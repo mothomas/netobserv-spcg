@@ -1,0 +1,22 @@
+# Optional: create secret spcg-dockerhub first (see docs/openshift-dockerhub-pull-secret.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-frontend
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: spcg-dockerhub
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-ui-portal
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: spcg-dockerhub

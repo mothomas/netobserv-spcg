@@ -99,6 +99,11 @@ oc rollout status deployment/spcg-ui-portal deployment/spcg-frontend -n pcap-fro
 
 Also ensure `spcg-oauth-client` secret exists (see §2) and run `oc apply -k manifests/overlays/openshift-small`.
 
-## 6. Images
+## 6. Docker Hub rate limit
 
-Use tags **small-20260621** or later for `spcg-ui-portal` and **small-20260623** for `spcg-frontend`.
+If pods show `toomanyrequests` / `ImagePullBackOff`, create pull secret **`spcg-dockerhub`**:
+[docs/openshift-dockerhub-pull-secret.md](../../openshift-dockerhub-pull-secret.md)
+
+## 7. Images
+
+Use tags **small-20260624** for `spcg-ui-portal` and `spcg-frontend` (or newer after configuring pull secrets).

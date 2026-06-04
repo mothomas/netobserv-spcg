@@ -3,8 +3,13 @@
 set -euo pipefail
 NS="${NS:-pcap-frontend}"
 PORTAL_IMAGE="${PORTAL_IMAGE:-docker.io/mothomas/spcg-ui-portal:small-20260624}"
-FRONTEND_IMAGE="${FRONTEND_IMAGE:-docker.io/mothomas/spcg-frontend:small-20260625}"
+FRONTEND_IMAGE="${FRONTEND_IMAGE:-docker.io/mothomas/spcg-frontend:small-20260624}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if ! oc get secret spcg-dockerhub -n "$NS" &>/dev/null; then
+  echo "WARN: secret spcg-dockerhub not found — Docker Hub may rate-limit pulls."
+  echo "      See docs/openshift-dockerhub-pull-secret.md"
+fi
 
 echo "Applying openshift-small overlay..."
 oc apply -k "${REPO_ROOT}/manifests/overlays/openshift-small"
