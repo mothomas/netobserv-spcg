@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
 
 	"github.com/netobserv/spcg/internal/auth"
 	spcgk8s "github.com/netobserv/spcg/internal/k8s"
@@ -129,7 +130,7 @@ func (s *Server) handleOpenShiftCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := cs.CoreV1().Namespaces().List(r.Context(), metav1.ListOptions{Limit: 1}); err != nil {
+	if _, err := cs.AuthenticationV1().SelfSubjectReviews().Create(r.Context(), &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{}); err != nil {
 		http.Error(w, fmt.Sprintf("token rejected by API server: %v", err), http.StatusUnauthorized)
 		return
 	}

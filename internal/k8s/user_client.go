@@ -13,12 +13,10 @@ func ClientsetFromBearerToken(userToken string) (*kubernetes.Clientset, error) {
 	if userToken == "" {
 		return nil, fmt.Errorf("bearer token is required")
 	}
-	cfg, err := restConfig()
+	cfg, err := restConfigForUserBearerToken(userToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed building cluster REST config: %w", err)
 	}
-	cfg.BearerToken = userToken
-	cfg.Impersonate = rest.ImpersonationConfig{}
 	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed creating kubernetes client from bearer token: %w", err)

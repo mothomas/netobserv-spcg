@@ -3,8 +3,10 @@
 set -euo pipefail
 QUAY_ORG="${QUAY_ORG:-moby}"
 QUAY="quay.io/${QUAY_ORG}"
-TAG="${TAG:-small-20260624}"
+TAG="${TAG:-small-20260605}"
 ENGINE_TAG="${ENGINE_TAG:-small-20260614}"
+# OpenShift worker nodes are amd64; on Apple Silicon always build with:
+#   docker buildx build --platform linux/amd64 -f deploy/Dockerfile.ui -t quay.io/${QUAY_ORG}/spcg-ui-portal:${TAG} --push .
 
 for pair in \
   "docker.io/mothomas/spcg-frontend:${TAG} ${QUAY}/spcg-frontend:${TAG}" \
