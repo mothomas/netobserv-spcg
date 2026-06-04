@@ -33,7 +33,7 @@ function authConfigFallback(portalDetail?: string): NextResponse | null {
       methods,
       openshift: {
         authorize_path: "/api/v1/auth/openshift/authorize",
-        error: `${detail} Verify: oc get pods -n pcap-frontend -l app=spcg-ui-portal -o custom-columns=IMAGE:.spec.containers[0].image`,
+        error: `${detail} Verify: oc get pods -n pcap-frontend -l app=spcg-ui-portal -o jsonpath='{.items[0].spec.containers[0].image}{"\\n"}' (quote -o in zsh)`,
       },
     },
     { status: 200, headers: { "Content-Type": "application/json" } }

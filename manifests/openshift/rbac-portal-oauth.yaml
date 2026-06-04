@@ -54,3 +54,18 @@ subjects:
   - kind: ServiceAccount
     name: spcg-ui-portal
     namespace: pcap-frontend
+---
+# OpenShift restricted-v2: custom SA needs explicit SCC (default SA gets it automatically).
+# Pod is non-root, caps dropped, seccomp RuntimeDefault; init busybox runAsUser 65534.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spcg-ui-portal-restricted-v2-scc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:restricted-v2
+subjects:
+  - kind: ServiceAccount
+    name: spcg-ui-portal
+    namespace: pcap-frontend
