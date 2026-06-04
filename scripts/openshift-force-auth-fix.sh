@@ -21,10 +21,28 @@ oc set env "deployment/spcg-frontend" -n "$NS" "SPCG_AUTH_METHODS=openshift"
 oc set env "deployment/spcg-ui-portal" -n "$NS" \
   "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui"
 
-echo "Restarting..."
+echo "Restarting (delete stuck pods if deployment UP-TO-DATE is 0)..."
 oc rollout restart "deployment/spcg-ui-portal" "deployment/spcg-frontend" -n "$NS"
+# Old ReplicaSets can leave a running pod on an older tag (e.g. small-20260614) while spec shows 20260622.
+sleep 3
+STUCK="$(oc get pods -n "$NS" -l app=spcg-ui-portal -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.containers[0].image}{"\n"}{end}' | grep -v "${PORTAL_IMAGE}$" || true)"
+if [ -n "$STUCK" ]; then
+  echo "Removing portal pod(s) not on ${PORTAL_IMAGE}:"
+  echo "$STUCK"
+  oc get pods -n "$NS" -l app=spcg-ui-portal -o name | while read -r p; do
+    img="$(oc get "$p" -n "$NS" -o jsonpath='{.spec.containers[0].image}')"
+    if [ "$img" != "$PORTAL_IMAGE" ]; then
+      oc delete "$p" -n "$NS" --wait=true
+    fi
+  done
+fi
 oc rollout status "deployment/spcg-ui-portal" -n "$NS" --timeout=5m
 oc rollout status "deployment/spcg-frontend" -n "$NS" --timeout=5m
+
+echo ""
+echo "=== Portal image on running pod (must match ${PORTAL_IMAGE}) ==="
+oc get pods -n "$NS" -l app=spcg-ui-portal \
+  -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready
 
 echo ""
 echo "=== Portal auth/config ==="
