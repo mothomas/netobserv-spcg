@@ -122,18 +122,12 @@ export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
   } catch {
     throw new Error("Invalid JSON from /api/v1/auth/config — is spcg-ui-portal running the correct image?");
   }
-  if (cfg.public_api_base) {
-    const here = typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "";
-    const api = cfg.public_api_base.replace(/\/$/, "");
-    if (here && api !== here) {
-      setPublicApiBase(api);
-      trace("setPublicApiBase", api);
-    }
-  }
+  // public_api_base (spcg-api Route) is for OAuth authorize_url only — browser API calls stay
+  // same-origin /api/* via Next middleware to avoid CORS + credentials failures on POST.
   return cfg;
 }
 
-/** Redirect browser to OpenShift OAuth (use spcg-api Route when configured). */
+/** Redirect browser to OpenShift OAuth (use spcg-api authorize_url when configured). */
 export function startOpenShiftLogin(authorizePath: string, authorizeUrl?: string): void {
   if (authorizeUrl) {
     window.location.href = authorizeUrl;

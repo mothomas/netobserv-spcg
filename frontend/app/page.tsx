@@ -27,7 +27,6 @@ import {
   getTroubleshootTrace,
   loginWithKubeconfig,
   fetchAuthConfig,
-  setPublicApiBase,
   startOpenShiftLogin,
   apiUrl,
   takePendingOpenShiftLogin,
