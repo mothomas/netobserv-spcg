@@ -47,14 +47,8 @@ oc create secret generic spcg-oauth-client -n pcap-frontend \
 
 ### 3. Portal RBAC + env (from kustomize)
 
-- `manifests/openshift/rbac-portal-oauth.yaml` — read Routes `oauth-openshift` and `spcg`; SCC `restricted-v2` for SA `spcg-ui-portal` (custom SAs need an explicit grant or pod creation fails with `FailedCreate`)
+- `manifests/openshift/rbac-portal-oauth.yaml` — Route `get` for namespace **`default`** SA (same as frontend; no cluster-admin SCC binding)
 - `SPCG_AUTH_METHODS=openshift`, `OAUTH_CLIENT_ID=spcg-ui`, secret `spcg-oauth-client`
-
-If the binding is missing on an existing cluster:
-
-```bash
-oc adm policy add-scc-to-user restricted-v2 -z spcg-ui-portal -n pcap-frontend
-```
 
 ```bash
 oc apply -k manifests/overlays/openshift-small
@@ -95,7 +89,7 @@ No OAuthClient required; UI shows file upload / paste kubeconfig again.
 
 | Symptom | Fix |
 |---------|-----|
-| Portal deployment `0/1`, `ReplicaFailure` / `FailedCreate` | Custom SA `spcg-ui-portal` needs SCC `restricted-v2` — apply overlay or `oc adm policy add-scc-to-user restricted-v2 -z spcg-ui-portal -n pcap-frontend` |
+| Portal deployment `0/1`, `ReplicaFailure` / `FailedCreate` | Run `oc describe rs/<newest-rs> -n pcap-frontend` — usually SCC (old deploy used custom SA) or missing `spcg-oauth-client`; `git pull` + re-apply overlay (portal uses **default** SA now) |
 | `404 page not found` on `/api/v1/auth/config` | Portal image too old — use `small-20260624+`, delete stale pods |
 | `ImagePullBackOff` / `toomanyrequests` | Cluster still on **docker.io** — apply overlay with **quay.io/moby** images ([openshift-quay-images.md](../../openshift-quay-images.md)) |
 | `No sign-in methods` | `SPCG_AUTH_METHODS=openshift` missing on **spcg-frontend** |

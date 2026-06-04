@@ -1,10 +1,5 @@
 # Lets ui-portal discover OAuth and SPCG Route hosts in-cluster (no manual domain env).
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: spcg-ui-portal
-  namespace: pcap-frontend
----
+# Uses namespace default SA (same as spcg-frontend) so restricted-v2 SCC applies without cluster-admin CRB.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -27,7 +22,7 @@ roleRef:
   name: spcg-ui-portal-route-reader
 subjects:
   - kind: ServiceAccount
-    name: spcg-ui-portal
+    name: default
     namespace: pcap-frontend
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -52,20 +47,5 @@ roleRef:
   name: spcg-ui-portal-oauth-route-reader
 subjects:
   - kind: ServiceAccount
-    name: spcg-ui-portal
-    namespace: pcap-frontend
----
-# OpenShift restricted-v2: custom SA needs explicit SCC (default SA gets it automatically).
-# Pod is non-root, caps dropped, seccomp RuntimeDefault; init busybox runAsUser 65534.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: spcg-ui-portal-restricted-v2-scc
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: system:openshift:scc:restricted-v2
-subjects:
-  - kind: ServiceAccount
-    name: spcg-ui-portal
+    name: default
     namespace: pcap-frontend
