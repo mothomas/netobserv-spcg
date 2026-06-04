@@ -95,6 +95,7 @@ No OAuthClient required; UI shows file upload / paste kubeconfig again.
 | `No sign-in methods` | `SPCG_AUTH_METHODS=openshift` missing on **spcg-frontend** |
 | OAuth redirect mismatch | Redirect URI in OAuthClient ≠ discovered callback URL |
 | `lookup oauth.openshift.svc.cluster.local: no such host` on login | Set `OAUTH_TOKEN_URL` from route: `oc get route oauth-openshift -n openshift-authentication -o jsonpath='https://{.spec.host}/oauth/token'` then `oc set env deployment/spcg-ui-portal -n pcap-frontend OAUTH_TOKEN_URL=<url>`; or run `./scripts/openshift-force-auth-fix.sh` |
+| `x509: certificate signed by unknown authority` on token POST | `oc set env deployment/spcg-ui-portal -n pcap-frontend OAUTH_TLS_INSECURE_SKIP_VERIFY=true` (included in openshift overlay; same as Argo CD `insecureCA`) |
 | Login timeout to OAuth (Argo [#12599](https://github.com/argoproj/argo-cd/issues/12599)) | Egress to `oauth-openshift` route on :443 (NetworkPolicy allows); optional `OAUTH_TLS_INSECURE_SKIP_VERIFY=true` |
 
 ```bash

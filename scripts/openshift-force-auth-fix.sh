@@ -26,10 +26,12 @@ fi
 oc set env "deployment/spcg-frontend" -n "$NS" "SPCG_AUTH_METHODS=openshift"
 if [ -n "$OAUTH_TOKEN_URL" ] && [ "$OAUTH_TOKEN_URL" != "https:///oauth/token" ]; then
   oc set env "deployment/spcg-ui-portal" -n "$NS" \
-    "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui" "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}"
+    "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui" \
+    "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}" "OAUTH_TLS_INSECURE_SKIP_VERIFY=true"
 else
   oc set env "deployment/spcg-ui-portal" -n "$NS" \
-    "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui"
+    "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui" \
+    "OAUTH_TLS_INSECURE_SKIP_VERIFY=true"
 fi
 
 echo "Restarting (delete stuck pods if deployment UP-TO-DATE is 0)..."

@@ -25,3 +25,6 @@ spec:
                 secretKeyRef:
                   name: spcg-oauth-client
                   key: client-secret
+            # Token POST uses oauth-openshift Route TLS; ingress CA is often not in the container trust store (Argo insecureCA).
+            - name: OAUTH_TLS_INSECURE_SKIP_VERIFY
+              value: "true"
