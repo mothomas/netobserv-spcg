@@ -2,8 +2,8 @@
 # Apply OpenShift auth ConfigMap, images, and roll out (run from repo root).
 set -euo pipefail
 NS="${NS:-pcap-frontend}"
-PORTAL_IMAGE="${PORTAL_IMAGE:-docker.io/mothomas/spcg-ui-portal:small-20260622}"
-FRONTEND_IMAGE="${FRONTEND_IMAGE:-docker.io/mothomas/spcg-frontend:small-20260623}"
+PORTAL_IMAGE="${PORTAL_IMAGE:-docker.io/mothomas/spcg-ui-portal:small-20260624}"
+FRONTEND_IMAGE="${FRONTEND_IMAGE:-docker.io/mothomas/spcg-frontend:small-20260624}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "Applying openshift-small overlay..."

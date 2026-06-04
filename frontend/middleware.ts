@@ -15,6 +15,29 @@ function portalBase(): string {
   );
 }
 
+function runtimeAuthMethods(): string[] {
+  const raw = (process.env.SPCG_AUTH_METHODS || "").trim();
+  if (!raw) return [];
+  return raw.split(",").map((m) => m.trim().toLowerCase()).filter(Boolean);
+}
+
+/** When ui-portal is on an old image (404), still expose OpenShift login UI from frontend env. */
+function authConfigFallback(): NextResponse | null {
+  const methods = runtimeAuthMethods();
+  if (!methods.includes("openshift")) return null;
+  return NextResponse.json(
+    {
+      methods,
+      openshift: {
+        authorize_path: "/api/v1/auth/openshift/authorize",
+        error:
+          "spcg-ui-portal returned 404 (image too old or rollout stuck). Use tag small-20260622+, delete stale portal pods, verify with: oc get pods -l app=spcg-ui-portal -o custom-columns=IMAGE:.spec.containers[0].image",
+      },
+    },
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+}
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   if (!pathname.startsWith("/api/")) {
@@ -51,6 +74,17 @@ export async function middleware(request: NextRequest) {
   if (troubleshoot()) {
     const snippet = res.status >= 400 ? ` body=${(await res.clone().text()).slice(0, 200)}` : "";
     log(`proxy ${request.method} ${pathname} <- ${res.status} ${Date.now() - t0}ms${snippet}`);
+  }
+  if (
+    request.method === "GET" &&
+    pathname === "/api/v1/auth/config" &&
+    res.status === 404
+  ) {
+    const fb = authConfigFallback();
+    if (fb) {
+      if (troubleshoot()) log("auth/config portal 404 — returning frontend fallback from SPCG_AUTH_METHODS");
+      return fb;
+    }
   }
   const out = new NextResponse(res.body, {
     status: res.status,
