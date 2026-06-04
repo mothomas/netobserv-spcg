@@ -20,5 +20,13 @@ else
 fi
 
 echo ""
-echo "=== Route spcg ==="
-oc get route spcg -n "$NS" -o jsonpath='  https://{.spec.host}{"\n"}' 2>/dev/null || echo "  Route spcg not found — run: oc apply -k manifests/overlays/openshift-small"
+echo "=== Route spcg (Argo CD 'url' equivalent) ==="
+UI_HOST=$(oc get route spcg -n "$NS" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)
+if [ -n "$UI_HOST" ]; then
+  echo "  UI: $UI_HOST"
+  echo "  OAuth redirect (register in OAuthClient spcg-ui):"
+  echo "    ${UI_HOST}/api/v1/auth/openshift/callback"
+  echo "  (Argo CD uses: <url>/api/dex/callback)"
+else
+  echo "  Route spcg not found — run: oc apply -k manifests/overlays/openshift-small"
+fi

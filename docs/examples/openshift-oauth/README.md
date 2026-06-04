@@ -1,109 +1,100 @@
 # OpenShift login (Argo CD–style)
 
-## One Route is enough
+SPCG mirrors [Argo CD OpenShift SSO](https://github.com/argoproj/argo-cd/blob/master/docs/operator-manual/user-management/index.md) and the [Dex OpenShift connector](https://github.com/dexidp/dex/blob/master/Documentation/connectors/openshift.md), without running Dex:
 
-SPCG needs Route **`spcg`** (UI). Route **`spcg-api`** is optional (direct API/SSE). OAuth callback URL uses the **UI** host:
+| | Argo CD | SPCG |
+|---|---------|------|
+| External URL | `argocd-cm` → `url` | Route **`spcg`** |
+| Callback | `/api/dex/callback` | `/api/v1/auth/openshift/callback` |
+| Token URL | Internal OAuth service | `https://oauth.openshift.svc.cluster.local/oauth/token` |
 
-`https://<spcg-route-host>/api/v1/auth/openshift/callback`
+See [ARGO-CD-PARITY.md](./ARGO-CD-PARITY.md) for a full mapping.
 
-(Next.js proxies `/api/*` to `spcg-ui-portal`.)
+## Choose a mode
 
-## 1. Check Routes and pods
+| Goal | Apply |
+|------|--------|
+| **OpenShift login** (Argo-style) | `manifests/overlays/openshift-small` + OAuthClient below |
+| **Kubeconfig only** (how it worked before OCP auth) | `manifests/overlays/openshift-kubeconfig` |
+
+## OpenShift login setup
+
+### 1. Routes and images
 
 ```bash
-oc get route spcg spcg-api -n pcap-frontend
-oc get pods -n pcap-frontend -l 'app in (spcg-frontend,spcg-ui-portal)'
-oc get pods -n pcap-capture -l app=spcg-backend-engine
-```
-
-If **`spcg` Route is missing**:
-
-```bash
+oc get route spcg -n pcap-frontend
 oc apply -k manifests/overlays/openshift-small
 ```
 
-Open UI: `oc get route spcg -n pcap-frontend -o jsonpath='https://{.spec.host}{"\n"}'`
+Requires **`spcg-ui-portal:small-20260624+`** and **`spcg-frontend:small-20260624+`**. If Docker Hub rate-limits pulls, see [openshift-dockerhub-pull-secret.md](../../openshift-dockerhub-pull-secret.md).
 
-## 2. OAuthClient (cluster admin)
+### 2. OAuthClient (cluster admin) — same idea as Argo CD
+
+Redirect URI **must match exactly** (cf. [argo-cd#4221](https://github.com/argoproj/argo-cd/issues/4221)):
 
 ```bash
 UI_HOST=$(oc get route spcg -n pcap-frontend -o jsonpath='https://{.spec.host}')
-echo "Register redirect: ${UI_HOST}/api/v1/auth/openshift/callback"
+echo "${UI_HOST}/api/v1/auth/openshift/callback"
 ```
 
-```yaml
-apiVersion: oauth.openshift.io/v1
-kind: OAuthClient
-metadata:
-  name: spcg-ui
-grantMethod: auto
-redirectURIs:
-  - https://YOUR-SPCG-ROUTE-HOST/api/v1/auth/openshift/callback
-secret: <random-32-chars>
-```
+Apply [oauth-client.yaml](./oauth-client.yaml) after editing host and secret, then:
 
 ```bash
 oc create secret generic spcg-oauth-client -n pcap-frontend \
-  --from-literal=client-secret='<same-secret>' \
+  --from-literal=client-secret='<same-as-oauth-client-secret>' \
   --dry-run=client -o yaml | oc apply -f -
 ```
 
-## 3. Portal RBAC + secret
+### 3. Portal RBAC + env (from kustomize)
 
-- `manifests/openshift/rbac-portal-oauth.yaml` — SA `spcg-ui-portal` reads Routes
-- Deployment env: `SPCG_AUTH_METHODS=openshift`, `OAUTH_CLIENT_ID=spcg-ui`, secret above
+- `manifests/openshift/rbac-portal-oauth.yaml` — read Routes `oauth-openshift` and `spcg`
+- `SPCG_AUTH_METHODS=openshift`, `OAUTH_CLIENT_ID=spcg-ui`, secret `spcg-oauth-client`
 
 ```bash
 oc apply -k manifests/overlays/openshift-small
 oc rollout restart deployment/spcg-ui-portal deployment/spcg-frontend -n pcap-frontend
 ```
 
-## 4. Verify
-
-`pcap-frontend` uses **restricted** PodSecurity — plain `oc run curl` is blocked. Use one of:
+Optional TLS (Argo `insecureCA: true`):
 
 ```bash
-# In-cluster (no extra pod)
-oc exec -n pcap-frontend deployment/spcg-ui-portal -- \
-  wget -qO- http://127.0.0.1:8080/api/v1/auth/config | jq .
+oc set env deployment/spcg-ui-portal -n pcap-frontend OAUTH_TLS_INSECURE_SKIP_VERIFY=true
+```
 
-# From laptop
-oc port-forward -n pcap-frontend deployment/spcg-ui-portal 18080:8080
-curl -s http://127.0.0.1:18080/api/v1/auth/config | jq .
+### 4. Verify
 
-# Or run the helper script
+```bash
 ./scripts/openshift-verify-auth.sh
 ```
 
-Browser UI (`oc get route spcg …`) should show **Log in via OpenShift**, not an empty card.
-
-If `/api/v1/auth/config` returns **404 page not found**, the **portal image is too old** — set
-`spcg-ui-portal` to **small-20260622+** and restart.
-
-If the UI says **No sign-in methods configured**, `SPCG_AUTH_METHODS=openshift` is missing on
-**spcg-frontend** (re-apply overlay or `oc set env` below).
-
-## 5. Quick fix (when UI shows 404 + no methods)
+Or:
 
 ```bash
-oc set env deployment/spcg-frontend -n pcap-frontend SPCG_AUTH_METHODS=openshift
-oc set env deployment/spcg-ui-portal -n pcap-frontend \
-  SPCG_AUTH_METHODS=openshift OAUTH_CLIENT_ID=spcg-ui
-oc set image deployment/spcg-ui-portal -n pcap-frontend \
-  ui-portal=docker.io/mothomas/spcg-ui-portal:small-20260622
-oc set image deployment/spcg-frontend -n pcap-frontend \
-  frontend=docker.io/mothomas/spcg-frontend:small-20260623
-oc rollout restart deployment/spcg-ui-portal deployment/spcg-frontend -n pcap-frontend
-oc rollout status deployment/spcg-ui-portal deployment/spcg-frontend -n pcap-frontend
+oc exec -n pcap-frontend deployment/spcg-ui-portal -- \
+  wget -qO- http://127.0.0.1:8080/api/v1/auth/config | jq .
 ```
 
-Also ensure `spcg-oauth-client` secret exists (see §2) and run `oc apply -k manifests/overlays/openshift-small`.
+Browser: **Log in via OpenShift** on the Route `spcg` host.
 
-## 6. Docker Hub rate limit
+## Kubeconfig-only (revert)
 
-If pods show `toomanyrequests` / `ImagePullBackOff`, create pull secret **`spcg-dockerhub`**:
-[docs/openshift-dockerhub-pull-secret.md](../../openshift-dockerhub-pull-secret.md)
+```bash
+oc apply -k manifests/overlays/openshift-kubeconfig
+oc rollout restart deployment/spcg-ui-portal deployment/spcg-frontend -n pcap-frontend
+```
 
-## 7. Images
+No OAuthClient required; UI shows file upload / paste kubeconfig again.
 
-Use tags **small-20260624** for `spcg-ui-portal` and `spcg-frontend` (or newer after configuring pull secrets).
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `404 page not found` on `/api/v1/auth/config` | Portal image too old — use `small-20260624+`, delete stale pods |
+| `ImagePullBackOff` / `toomanyrequests` | Docker Hub pull secret — see openshift-dockerhub doc |
+| `No sign-in methods` | `SPCG_AUTH_METHODS=openshift` missing on **spcg-frontend** |
+| OAuth redirect mismatch | Redirect URI in OAuthClient ≠ discovered callback URL |
+| Login timeout to OAuth (Argo [#12599](https://github.com/argoproj/argo-cd/issues/12599)) | Egress/proxy to `oauth-openshift`; token uses in-cluster `oauth.openshift.svc` |
+
+```bash
+bash scripts/openshift-force-auth-fix.sh   # after pull secret exists
+```

@@ -1,0 +1,11 @@
+# Cluster-admin: register OAuth client for SPCG (Argo CD–style).
+# 1) Replace YOUR-SPCG-ROUTE-HOST with: oc get route spcg -n pcap-frontend -o jsonpath='{.spec.host}'
+# 2) Replace <random-32-chars> and mirror the same value in secret spcg-oauth-client.
+apiVersion: oauth.openshift.io/v1
+kind: OAuthClient
+metadata:
+  name: spcg-ui
+grantMethod: auto
+redirectURIs:
+  - https://YOUR-SPCG-ROUTE-HOST/api/v1/auth/openshift/callback
+secret: "<random-32-chars>"

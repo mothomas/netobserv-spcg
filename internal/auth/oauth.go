@@ -3,12 +3,14 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -116,8 +118,24 @@ func AuthorizeRedirectURL(cfg OAuthSettings, state string) (string, error) {
 	return u.String(), nil
 }
 
+// OAuthHTTPClient is used for token exchange (Argo CD Dex uses insecureCA similarly on OpenShift).
+func OAuthHTTPClient() http.Client {
+	tr := http.DefaultTransport
+	if os.Getenv("OAUTH_TLS_INSECURE_SKIP_VERIFY") == "true" || os.Getenv("OAUTH_TLS_INSECURE_SKIP_VERIFY") == "1" {
+		if base, ok := tr.(*http.Transport); ok {
+			cp := base.Clone()
+			if cp.TLSClientConfig == nil {
+				cp.TLSClientConfig = &tls.Config{}
+			}
+			cp.TLSClientConfig.InsecureSkipVerify = true
+			tr = cp
+		}
+	}
+	return http.Client{Timeout: 30 * time.Second, Transport: tr}
+}
+
 // ExchangeCodeForToken performs the authorization_code grant against the OAuth token endpoint.
-func ExchangeCodeForToken(ctx http.Client, cfg OAuthSettings, code string) (string, error) {
+func ExchangeCodeForToken(client http.Client, cfg OAuthSettings, code string) (string, error) {
 	if err := cfg.Valid(); err != nil {
 		return "", err
 	}
@@ -133,7 +151,7 @@ func ExchangeCodeForToken(ctx http.Client, cfg OAuthSettings, code string) (stri
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := ctx.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

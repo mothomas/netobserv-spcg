@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -120,8 +119,7 @@ func (s *Server) handleOpenShiftCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid or expired oauth state", http.StatusBadRequest)
 		return
 	}
-	client := http.Client{Timeout: 30 * time.Second}
-	accessToken, err := auth.ExchangeCodeForToken(client, cfg, code)
+	accessToken, err := auth.ExchangeCodeForToken(auth.OAuthHTTPClient(), cfg, code)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return

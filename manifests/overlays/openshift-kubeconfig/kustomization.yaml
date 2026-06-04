@@ -1,0 +1,8 @@
+# OpenShift deploy with kubeconfig login only (no OAuth) — same UX as before OCP auth integration.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../openshift-small
+patches:
+  - path: patch-config-auth-kubeconfig.yaml
+  - path: patch-auth-kubeconfig-only.yaml
