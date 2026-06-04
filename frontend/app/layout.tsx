@@ -21,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {authMethods ? <meta name="spcg-auth-methods" content={authMethods} /> : null}
         {boot.length > 0 ? (
           <script dangerouslySetInnerHTML={{ __html: boot.join("") }} />
         ) : null}

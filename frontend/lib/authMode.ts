@@ -1,6 +1,12 @@
+function authMethodsFromMeta(): string {
+  if (typeof document === "undefined") return "";
+  return document.querySelector('meta[name="spcg-auth-methods"]')?.getAttribute("content")?.trim() || "";
+}
+
 export function runtimeAuthMethods(): string[] {
   if (typeof window === "undefined") return [];
-  const raw = (window as Window & { __SPCG_AUTH_METHODS__?: string }).__SPCG_AUTH_METHODS__;
+  const raw =
+    (window as Window & { __SPCG_AUTH_METHODS__?: string }).__SPCG_AUTH_METHODS__ || authMethodsFromMeta();
   if (!raw) return [];
   return raw.split(",").map((m) => m.trim().toLowerCase()).filter(Boolean);
 }
