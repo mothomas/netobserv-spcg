@@ -9,12 +9,13 @@ spec:
     spec:
       initContainers:
         - name: wait-neo4j
-          image: busybox:1.36
+          # UBI from registry.redhat.io (not docker.io/busybox) — reachable on restricted OCP without pull secrets.
+          image: registry.redhat.io/ubi9/ubi-minimal:9.5
           command:
             - sh
             - -c
             - |
-              until nc -z spcg-neo4j.pcap-frontend.svc.cluster.local 7687; do
+              until (echo >/dev/tcp/spcg-neo4j.pcap-frontend.svc.cluster.local/7687) 2>/dev/null; do
                 echo "waiting for neo4j..."
                 sleep 2
               done
