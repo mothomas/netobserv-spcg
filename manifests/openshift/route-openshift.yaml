@@ -26,7 +26,7 @@ metadata:
   annotations:
     haproxy.router.openshift.io/timeout: 5m
 spec:
-  path: /api
+  # No path prefix — portal serves /api/v1/* (path: /api would strip prefix → 404).
   to:
     kind: Service
     name: spcg-ui-portal
