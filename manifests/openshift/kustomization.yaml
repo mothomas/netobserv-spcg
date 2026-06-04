@@ -9,13 +9,13 @@ resources:
   - route-openshift.yaml
 images:
   - name: docker.io/mothomas/spcg-backend-engine
-    newName: docker.io/mothomas/spcg-backend-engine
+    newName: quay.io/moby/spcg-backend-engine
     newTag: small-20260614
   - name: docker.io/mothomas/spcg-ui-portal
-    newName: docker.io/mothomas/spcg-ui-portal
+    newName: quay.io/moby/spcg-ui-portal
     newTag: small-20260624
   - name: docker.io/mothomas/spcg-frontend
-    newName: docker.io/mothomas/spcg-frontend
+    newName: quay.io/moby/spcg-frontend
     newTag: small-20260624
 patches:
   - path: patches/tolerations.yaml
@@ -24,6 +24,7 @@ patches:
   - path: patches/ui-portal-auth-openshift.yaml
   - path: patches/frontend-auth-openshift.yaml
   - path: patches/frontend-troubleshoot.yaml
+  - path: patches/imagepull-quay.yaml
   - target:
       kind: Service
       name: spcg-frontend

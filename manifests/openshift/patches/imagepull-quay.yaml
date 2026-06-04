@@ -1,0 +1,33 @@
+# Requires secret spcg-quay (see docs/openshift-quay-images.md). Safe for public Quay repos too.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-frontend
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: spcg-quay
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-ui-portal
+  namespace: pcap-frontend
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: spcg-quay
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-backend-engine
+  namespace: pcap-capture
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: spcg-quay

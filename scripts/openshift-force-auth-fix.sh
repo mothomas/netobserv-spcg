@@ -2,13 +2,12 @@
 # Apply OpenShift auth ConfigMap, images, and roll out (run from repo root).
 set -euo pipefail
 NS="${NS:-pcap-frontend}"
-PORTAL_IMAGE="${PORTAL_IMAGE:-docker.io/mothomas/spcg-ui-portal:small-20260624}"
-FRONTEND_IMAGE="${FRONTEND_IMAGE:-docker.io/mothomas/spcg-frontend:small-20260624}"
+PORTAL_IMAGE="${PORTAL_IMAGE:-quay.io/moby/spcg-ui-portal:small-20260624}"
+FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260624}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-if ! oc get secret spcg-dockerhub -n "$NS" &>/dev/null; then
-  echo "WARN: secret spcg-dockerhub not found — Docker Hub may rate-limit pulls."
-  echo "      See docs/openshift-dockerhub-pull-secret.md"
+if ! oc get secret spcg-quay -n "$NS" &>/dev/null; then
+  echo "WARN: secret spcg-quay not found — create before pull (see docs/openshift-quay-images.md)"
 fi
 
 echo "Applying openshift-small overlay..."
