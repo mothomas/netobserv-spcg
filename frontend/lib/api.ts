@@ -109,8 +109,19 @@ export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
   const res = await fetch(url, { cache: "no-store", credentials: "include" });
   const bodyText = await res.text();
   trace("fetchAuthConfig response", `${res.status} len=${bodyText.length}`);
-  if (!res.ok) throw new Error(bodyText || `HTTP ${res.status}`);
-  const cfg = JSON.parse(bodyText) as AuthConfigResponse;
+  if (!res.ok) {
+    const short =
+      bodyText.startsWith("<!DOCTYPE") || bodyText.startsWith("<html")
+        ? `HTTP ${res.status} from UI (portal unreachable or middleware error). Check spcg-ui-portal pod image and readiness.`
+        : bodyText.slice(0, 500) || `HTTP ${res.status}`;
+    throw new Error(short);
+  }
+  let cfg: AuthConfigResponse;
+  try {
+    cfg = JSON.parse(bodyText) as AuthConfigResponse;
+  } catch {
+    throw new Error("Invalid JSON from /api/v1/auth/config — is spcg-ui-portal running the correct image?");
+  }
   if (cfg.public_api_base) {
     const here = typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "";
     const api = cfg.public_api_base.replace(/\/$/, "");
