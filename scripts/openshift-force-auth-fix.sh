@@ -2,7 +2,7 @@
 # Apply OpenShift auth ConfigMap, images, and roll out (run from repo root).
 set -euo pipefail
 NS="${NS:-pcap-frontend}"
-PORTAL_IMAGE="${PORTAL_IMAGE:-quay.io/moby/spcg-ui-portal:small-20260624}"
+PORTAL_IMAGE="${PORTAL_IMAGE:-quay.io/moby/spcg-ui-portal:small-20260605}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260625}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -18,20 +18,38 @@ oc set image "deployment/spcg-frontend" -n "$NS" "frontend=${FRONTEND_IMAGE}"
 
 echo "Setting auth env (in case patches were skipped)..."
 OAUTH_TOKEN_URL="$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='https://{.spec.host}/oauth/token' 2>/dev/null || true)"
+OAUTH_HOST="$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+CLUSTER_DOMAIN="$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}' 2>/dev/null || true)"
 if [ -z "$OAUTH_TOKEN_URL" ] || [ "$OAUTH_TOKEN_URL" = "https:///oauth/token" ]; then
   echo "WARN: could not read route oauth-openshift; set OAUTH_TOKEN_URL manually on spcg-ui-portal"
 else
   echo "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}"
 fi
+
+echo "Syncing oauth serving CA to ${NS}/spcg-oauth-serving-ca (optional TLS trust)..."
+if oc get cm oauth-serving-cert -n openshift-config-managed -o jsonpath='{.data.ca-bundle\.crt}' 2>/dev/null | grep -q BEGIN; then
+  oc create configmap spcg-oauth-serving-ca -n "$NS" \
+    --from-literal=ca-bundle.crt="$(oc get cm oauth-serving-cert -n openshift-config-managed -o jsonpath='{.data.ca-bundle\.crt}')" \
+    --dry-run=client -o yaml | oc apply -f -
+else
+  echo "WARN: oauth-serving-cert ConfigMap not readable; rely on OAUTH_TLS_INSECURE_SKIP_VERIFY"
+fi
+
+NO_PROXY=".cluster.local,.svc,127.0.0.1,localhost"
+[ -n "$OAUTH_HOST" ] && NO_PROXY="${NO_PROXY},${OAUTH_HOST}"
+[ -n "$CLUSTER_DOMAIN" ] && NO_PROXY="${NO_PROXY},.${CLUSTER_DOMAIN}"
+echo "NO_PROXY=${NO_PROXY}"
+
 oc set env "deployment/spcg-frontend" -n "$NS" "SPCG_AUTH_METHODS=openshift"
 if [ -n "$OAUTH_TOKEN_URL" ] && [ "$OAUTH_TOKEN_URL" != "https:///oauth/token" ]; then
   oc set env "deployment/spcg-ui-portal" -n "$NS" \
     "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui" \
-    "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}" "OAUTH_TLS_INSECURE_SKIP_VERIFY=true"
+    "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}" "OAUTH_TLS_INSECURE_SKIP_VERIFY=true" \
+    "NO_PROXY=${NO_PROXY}"
 else
   oc set env "deployment/spcg-ui-portal" -n "$NS" \
     "SPCG_AUTH_METHODS=openshift" "OAUTH_CLIENT_ID=spcg-ui" \
-    "OAUTH_TLS_INSECURE_SKIP_VERIFY=true"
+    "OAUTH_TLS_INSECURE_SKIP_VERIFY=true" "NO_PROXY=${NO_PROXY}"
 fi
 
 echo "Restarting (delete stuck pods if deployment UP-TO-DATE is 0)..."

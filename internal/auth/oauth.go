@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -118,20 +119,52 @@ func AuthorizeRedirectURL(cfg OAuthSettings, state string) (string, error) {
 	return u.String(), nil
 }
 
+func oauthTLSInsecureSkipVerify() bool {
+	v := strings.TrimSpace(os.Getenv("OAUTH_TLS_INSECURE_SKIP_VERIFY"))
+	return v == "true" || v == "1" || strings.EqualFold(v, "yes")
+}
+
+func oauthTLSConfig() *tls.Config {
+	insecure := oauthTLSInsecureSkipVerify()
+	caPath := strings.TrimSpace(os.Getenv("OAUTH_CA_BUNDLE"))
+	if !insecure && caPath == "" {
+		return nil
+	}
+	cfg := &tls.Config{}
+	if insecure {
+		cfg.InsecureSkipVerify = true
+	}
+	if caPath != "" {
+		pem, err := os.ReadFile(caPath)
+		if err != nil {
+			return cfg
+		}
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		pool.AppendCertsFromPEM(pem)
+		cfg.RootCAs = pool
+	}
+	return cfg
+}
+
+func oauthRoundTripper() http.RoundTripper {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	} else {
+		base = base.Clone()
+	}
+	if tlsCfg := oauthTLSConfig(); tlsCfg != nil {
+		base.TLSClientConfig = tlsCfg
+	}
+	return base
+}
+
 // OAuthHTTPClient is used for token exchange (Argo CD Dex uses insecureCA similarly on OpenShift).
 func OAuthHTTPClient() http.Client {
-	tr := http.DefaultTransport
-	if os.Getenv("OAUTH_TLS_INSECURE_SKIP_VERIFY") == "true" || os.Getenv("OAUTH_TLS_INSECURE_SKIP_VERIFY") == "1" {
-		if base, ok := tr.(*http.Transport); ok {
-			cp := base.Clone()
-			if cp.TLSClientConfig == nil {
-				cp.TLSClientConfig = &tls.Config{}
-			}
-			cp.TLSClientConfig.InsecureSkipVerify = true
-			tr = cp
-		}
-	}
-	return http.Client{Timeout: 30 * time.Second, Transport: tr}
+	return http.Client{Timeout: 30 * time.Second, Transport: oauthRoundTripper()}
 }
 
 // ExchangeCodeForToken performs the authorization_code grant against the OAuth token endpoint.

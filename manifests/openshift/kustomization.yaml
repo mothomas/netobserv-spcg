@@ -13,7 +13,7 @@ images:
     newTag: small-20260614
   - name: docker.io/mothomas/spcg-ui-portal
     newName: quay.io/moby/spcg-ui-portal
-    newTag: small-20260624
+    newTag: small-20260605
   - name: docker.io/mothomas/spcg-frontend
     newName: quay.io/moby/spcg-frontend
     newTag: small-20260625
@@ -22,6 +22,7 @@ patches:
   - path: patches/neo4j-pod-security.yaml
   - path: patches/ui-portal-neo4j-wait.yaml
   - path: patches/ui-portal-auth-openshift.yaml
+  - path: patches/ui-portal-oauth-ca.yaml
   - path: patches/frontend-auth-openshift.yaml
   - path: patches/frontend-troubleshoot.yaml
   - path: patches/quay-explicit-images.yaml
