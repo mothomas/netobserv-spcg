@@ -38,6 +38,8 @@ spec:
               value: spcg-landing
             - name: CONTROL_NS
               value: spcg-control
+            - name: API_ROUTE_WAIT_SECS
+              value: "120"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
