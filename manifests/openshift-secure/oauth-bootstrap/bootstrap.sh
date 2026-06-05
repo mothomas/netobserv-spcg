@@ -1,5 +1,9 @@
 #!/bin/sh
 set -eu
+# ose-cli image provides oc; plain kubectl image provides kubectl.
+if command -v oc >/dev/null 2>&1; then
+  kubectl() { oc "$@"; }
+fi
 OAUTH_CLIENT_NAME="${OAUTH_CLIENT_NAME:-spcg-ui}"
 SECRET_NAME="${SECRET_NAME:-spcg-oauth-client}"
 SECRET_KEY="${SECRET_KEY:-client-secret}"

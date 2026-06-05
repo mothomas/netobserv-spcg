@@ -30,7 +30,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: bootstrap
-          image: registry.k8s.io/kubectl:v1.31.0
+          # ose-cli runs on restricted-v2; registry.k8s.io/kubectl pins UID 1000 (outside OCP namespace ranges).
+          image: registry.redhat.io/openshift4/ose-cli:rhel9
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/scripts/bootstrap.sh"]
           env:
@@ -43,7 +44,7 @@ spec:
             capabilities:
               drop: ["ALL"]
             runAsNonRoot: true
-            runAsUser: 1000
+            # Do not pin runAsUser — must stay within namespace SCC UID range (restricted-v2).
           volumeMounts:
             - name: scripts
               mountPath: /scripts
