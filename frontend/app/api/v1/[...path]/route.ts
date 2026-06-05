@@ -31,6 +31,10 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
     if (key.toLowerCase() === "host") return;
     headers.set(key, value);
   });
+  const fwdHost = req.headers.get("x-forwarded-host") || req.headers.get("host");
+  const fwdProto = req.headers.get("x-forwarded-proto") || "https";
+  if (fwdHost) headers.set("X-Forwarded-Host", fwdHost);
+  if (fwdProto) headers.set("X-Forwarded-Proto", fwdProto);
 
   const init: RequestInit & { duplex?: "half" } = {
     method: req.method,

@@ -62,6 +62,8 @@ grantMethod: ${GRANT_METHOD}
 redirectURIs:
   - ${API_REDIRECT_URI}
   - ${UI_REDIRECT_URI}
+  - https://${API_HOST}/
+  - https://${UI_HOST}/
 secret: "${sec}"
 EOC
 }

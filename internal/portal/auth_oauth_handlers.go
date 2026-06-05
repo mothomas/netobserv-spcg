@@ -77,6 +77,9 @@ func (s *Server) handleOpenShiftAuthorize(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+	if u := auth.CallbackRedirectURLFromRequest(r); u != "" {
+		cfg.RedirectURL = u
+	}
 	state, err := auth.OAuthState.Issue()
 	if err != nil {
 		http.Error(w, "failed to start oauth", http.StatusInternalServerError)
@@ -107,6 +110,9 @@ func (s *Server) handleOpenShiftCallback(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
+	}
+	if u := auth.CallbackRedirectURLFromRequest(r); u != "" {
+		cfg.RedirectURL = u
 	}
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
 		desc := r.URL.Query().Get("error_description")

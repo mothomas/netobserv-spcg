@@ -166,9 +166,20 @@ func ResolveOAuthSettings(ctx context.Context) (OAuthSettings, bool, error) {
 	return cfg, true, nil
 }
 
-// IngressBaseURL builds https://host from a proxied HTTP request (fallback when Route discovery fails).
+// IngressBaseURL builds the public https://host from a request (X-Forwarded-* when proxied via spcg-frontend).
 func IngressBaseURL(r *http.Request) string {
-	if r == nil || r.Host == "" {
+	if r == nil {
+		return ""
+	}
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = r.Host
+	}
+	if idx := strings.Index(host, ","); idx > 0 {
+		host = strings.TrimSpace(host[:idx])
+	}
+	host = strings.TrimSuffix(host, "/")
+	if host == "" || strings.Contains(host, ".svc") || strings.Contains(host, ".cluster.local") {
 		return ""
 	}
 	proto := "https"
@@ -179,5 +190,14 @@ func IngressBaseURL(r *http.Request) string {
 			proto = "http"
 		}
 	}
-	return proto + "://" + strings.TrimSuffix(r.Host, "/")
+	return proto + "://" + host
+}
+
+// CallbackRedirectURLFromRequest is the OAuth redirect_uri matching the browser-visible Route host.
+func CallbackRedirectURLFromRequest(r *http.Request) string {
+	base := IngressBaseURL(r)
+	if base == "" {
+		return ""
+	}
+	return strings.TrimSuffix(base, "/") + "/api/v1/auth/openshift/callback"
 }
