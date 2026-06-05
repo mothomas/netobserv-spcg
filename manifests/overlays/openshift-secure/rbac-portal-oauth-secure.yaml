@@ -1,0 +1,50 @@
+# Portal (default SA in spcg-control) discovers UI + API Route hosts and oauth-openshift.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spcg-ui-portal-route-reader
+  namespace: spcg-control
+rules:
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    resourceNames: ["spcg-api"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spcg-ui-portal-route-reader
+  namespace: spcg-control
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spcg-ui-portal-route-reader
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: spcg-control
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spcg-ui-portal-landing-route-reader
+  namespace: spcg-landing
+rules:
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    resourceNames: ["spcg"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spcg-ui-portal-landing-route-reader
+  namespace: spcg-landing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spcg-ui-portal-landing-route-reader
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: spcg-control

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-frontend
+spec:
+  template:
+    spec:
+      containers:
+        - name: frontend
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: SPCG_DISABLE_API_PROXY
+              value: "true"
+            - name: SPCG_PUBLIC_API_BASE
+              value: "https://spcg-api.apps.example.com"
+          envFrom:
+            - configMapRef:
+                name: spcg-auth-env

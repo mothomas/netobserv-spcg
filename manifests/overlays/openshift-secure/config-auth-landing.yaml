@@ -1,0 +1,8 @@
+# Auth mode hint for landing UI only (no OAuth secrets).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spcg-auth-env
+  namespace: spcg-landing
+data:
+  SPCG_AUTH_METHODS: openshift,kubeconfig

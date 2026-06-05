@@ -1,0 +1,37 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: spcg
+  namespace: spcg-landing
+  labels:
+    app: spcg-frontend
+spec:
+  to:
+    kind: Service
+    name: spcg-frontend
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: spcg-api
+  namespace: spcg-control
+  labels:
+    app: spcg-ui-portal
+  annotations:
+    haproxy.router.openshift.io/timeout: 5m
+spec:
+  to:
+    kind: Service
+    name: spcg-ui-portal
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

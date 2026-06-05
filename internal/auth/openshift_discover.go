@@ -29,17 +29,19 @@ func DiscoverOpenShiftRoutes(ctx context.Context, spcgNS string) (authorizeURL, 
 	if spcgNS == "" {
 		spcgNS = envOrDefault("SPCG_NAMESPACE", "pcap-frontend")
 	}
+	landingNS := envOrDefault("SPCG_LANDING_NAMESPACE", spcgNS)
+	controlNS := envOrDefault("SPCG_CONTROL_NAMESPACE", spcgNS)
 	oauthHost, err := routeHTTPSHost(ctx, cfg, oauthRouteNS, oauthRouteName)
 	if err != nil {
 		return "", "", "", "", "", fmt.Errorf("oauth route: %w", err)
 	}
-	uiHost, err := routeHTTPSHost(ctx, cfg, spcgNS, "spcg")
+	uiHost, err := routeHTTPSHost(ctx, cfg, landingNS, "spcg")
 	if err != nil {
 		return "", "", "", "", "", fmt.Errorf("spcg route: %w", err)
 	}
 	// Prefer dedicated API route when present; otherwise single-host (Argo CD–style) UI route + Next /api proxy.
 	publicAPIBase = uiHost
-	if apiHost, err := routeHTTPSHost(ctx, cfg, spcgNS, "spcg-api"); err == nil {
+	if apiHost, err := routeHTTPSHost(ctx, cfg, controlNS, "spcg-api"); err == nil {
 		publicAPIBase = apiHost
 	}
 	authorizeURL = oauthHost + "/oauth/authorize"
@@ -50,8 +52,11 @@ func DiscoverOpenShiftRoutes(ctx context.Context, spcgNS string) (authorizeURL, 
 	} else if useLegacy := strings.TrimSpace(os.Getenv("OAUTH_TOKEN_URL_LEGACY_INTERNAL")); useLegacy == "true" || useLegacy == "1" {
 		tokenURL = legacyInternalOAuthTokenURL
 	}
-	// OAuth callback on UI host so one Route is enough; Next.js proxies /api to ui-portal.
+	// Monolithic overlay: callback on UI host (Next.js proxies /api). Secure split: callback on API Route host.
 	redirectURL = uiHost + "/api/v1/auth/openshift/callback"
+	if publicAPIBase != "" && publicAPIBase != uiHost {
+		redirectURL = publicAPIBase + "/api/v1/auth/openshift/callback"
+	}
 	frontendURL = uiHost
 	return authorizeURL, tokenURL, redirectURL, frontendURL, publicAPIBase, nil
 }

@@ -104,8 +104,9 @@ export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
   } catch {
     throw new Error("Invalid JSON from /api/v1/auth/config — is spcg-ui-portal running the correct image?");
   }
-  // public_api_base (spcg-api Route) is for OAuth authorize_url only — browser API calls stay
-  // same-origin /api/* via Next middleware to avoid CORS + credentials failures on POST.
+  if (cfg.public_api_base) {
+    setPublicApiBase(cfg.public_api_base);
+  }
   return cfg;
 }
 

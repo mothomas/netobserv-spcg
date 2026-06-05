@@ -1,0 +1,121 @@
+# OpenShift secure tier: 3-namespace split (landing / control / capture).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../openshift-small
+  - namespace-landing.yaml
+  - namespace-control.yaml
+  - config-auth-landing.yaml
+  - routes-secure.yaml
+  - rbac-portal-oauth-secure.yaml
+  - network-policies-secure.yaml
+patches:
+  - path: patches/delete-pcap-frontend.yaml
+  - path: patches/delete-monolithic-routes.yaml
+  - path: patches/delete-monolithic-rbac.yaml
+  - path: patches/delete-monolithic-network-policies.yaml
+  - path: patches/patch-capture-namespace-label.yaml
+  - target:
+      kind: Deployment
+      name: spcg-frontend
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-landing
+  - target:
+      kind: Service
+      name: spcg-frontend
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-landing
+  - target:
+      kind: Deployment
+      name: spcg-ui-portal
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-control
+  - target:
+      kind: Service
+      name: spcg-ui-portal
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-control
+  - target:
+      kind: Deployment
+      name: spcg-neo4j
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-control
+  - target:
+      kind: Service
+      name: spcg-neo4j
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-control
+  - target:
+      kind: Secret
+      name: spcg-neo4j-auth
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-control
+  - target:
+      kind: Secret
+      name: spcg-graph-master-key
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-control
+  - target:
+      kind: ConfigMap
+      name: spcg-capture-admission
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-control
+  - target:
+      kind: ConfigMap
+      name: spcg-auth-env
+      namespace: pcap-frontend
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: spcg-control
+  - path: patches/patch-frontend-landing.yaml
+    target:
+      kind: Deployment
+      name: spcg-frontend
+      namespace: spcg-landing
+  - target:
+      kind: Deployment
+      name: spcg-frontend
+      namespace: spcg-landing
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: NODE_ENV
+            value: production
+          - name: HOSTNAME
+            value: "0.0.0.0"
+          - name: SPCG_DISABLE_API_PROXY
+            value: "true"
+          - name: SPCG_PUBLIC_API_BASE
+            value: "https://spcg-api.apps.example.com"
+  - path: patches/patch-ui-portal-control.yaml
+    target:
+      kind: Deployment
+      name: spcg-ui-portal
+      namespace: spcg-control
+  - path: patches/patch-neo4j-control.yaml
+    target:
+      kind: Deployment
+      name: spcg-neo4j
+      namespace: spcg-control
+  - path: patches/patch-oauth-rbac-subject.yaml
+  - path: patches/patch-capture-network-policy.yaml

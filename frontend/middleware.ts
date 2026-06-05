@@ -48,9 +48,17 @@ async function proxyAuthConfig(request: NextRequest): Promise<NextResponse> {
   }
 }
 
+function apiProxyDisabled(): boolean {
+  const v = (process.env.SPCG_DISABLE_API_PROXY || "").trim().toLowerCase();
+  return v === "true" || v === "1";
+}
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   if (!pathname.startsWith("/api/")) {
+    return NextResponse.next();
+  }
+  if (apiProxyDisabled()) {
     return NextResponse.next();
   }
   if (request.method === "GET" && pathname === "/api/v1/auth/config") {

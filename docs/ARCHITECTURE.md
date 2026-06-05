@@ -4,7 +4,7 @@ Secure Packet Capture Gateway — namespace-scoped netobserv capture with a brow
 
 **OpenShift security:** [openshift-security.md](./openshift-security.md)  
 **Deploy:** [DEPLOYMENT.md](./DEPLOYMENT.md)  
-**Future hardened split:** [SECURE-ARCHITECTURE-PLAN.md](./SECURE-ARCHITECTURE-PLAN.md)
+**Hardened OpenShift overlay:** `manifests/overlays/openshift-secure` (landing / control / capture). Master plan: [SECURE-ARCHITECTURE-PLAN.md](./SECURE-ARCHITECTURE-PLAN.md)
 
 ---
 
@@ -14,7 +14,7 @@ Secure Packet Capture Gateway — namespace-scoped netobserv capture with a brow
 |-----------|----------------|
 | User identity, not portal SA | All K8s list/capture uses uploaded **OAuth token** or **kubeconfig** |
 | Thin browser | Next.js proxies `/api/*`; SSE metrics; PCAP via download/S3 |
-| Privilege isolation | `pcap-capture` privileged; `pcap-frontend` restricted PSS |
+| Privilege isolation | `pcap-capture` privileged; frontend tier restricted PSS (`pcap-frontend` or `spcg-landing`+`spcg-control`) |
 | Fail closed | Invalid session → 401; capture ownership checked per request |
 | Tier via config | Small/Medium/Peak = Kustomize overlays + admission ConfigMap |
 
@@ -39,7 +39,7 @@ Secure Packet Capture Gateway — namespace-scoped netobserv capture with a brow
 
 | Image | Role |
 |-------|------|
-| `spcg-frontend` | Static UI, `/api` reverse proxy to portal |
+| `spcg-frontend` | Static UI; monolithic overlay proxies `/api` to portal; **openshift-secure** calls Route `spcg-api` directly |
 | `spcg-ui-portal` | Auth, REST/SSE, PCAP session, Neo4j, AI |
 | `spcg-backend-engine` | gRPC, sensor lifecycle, flow collectors |
 | `neo4j:5.26-community` | Optional graph (base manifest) |

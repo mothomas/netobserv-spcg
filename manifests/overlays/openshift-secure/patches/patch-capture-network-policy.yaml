@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend-engine
+  namespace: pcap-capture
+spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              spcg.io/role: control
+          podSelector:
+            matchLabels:
+              app: spcg-ui-portal
+      ports:
+        - protocol: TCP
+          port: 8443

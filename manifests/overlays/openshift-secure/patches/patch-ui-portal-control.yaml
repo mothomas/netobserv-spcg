@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-ui-portal
+spec:
+  template:
+    spec:
+      containers:
+        - name: ui-portal
+          env:
+            - name: UI_LISTEN
+              value: ":8080"
+            - name: ENGINE_GRPC_ADDR
+              value: "spcg-backend-engine.pcap-capture.svc.cluster.local:8443"
+            - name: NEO4J_URI
+              value: "bolt://spcg-neo4j.spcg-control.svc.cluster.local:7687"
+            - name: NEO4J_USER
+              value: neo4j
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-neo4j-auth
+                  key: password
+            - name: GRAPH_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-graph-master-key
+                  key: GRAPH_MASTER_KEY
+            - name: SPCG_LANDING_NAMESPACE
+              value: spcg-landing
+            - name: SPCG_CONTROL_NAMESPACE
+              value: spcg-control
+            - name: CORS_ORIGIN
+              value: "https://spcg.apps.example.com"
+            - name: OAUTH_CLIENT_ID
+              value: spcg-ui
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-oauth-client
+                  key: client-secret
+            - name: OAUTH_TLS_INSECURE_SKIP_VERIFY
+              value: "true"
+            - name: OAUTH_CA_BUNDLE
+              value: /etc/oauth-ca/ca-bundle.crt
+          envFrom:
+            - configMapRef:
+                name: spcg-capture-admission
+            - configMapRef:
+                name: spcg-auth-env
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: oauth-ca
+              mountPath: /etc/oauth-ca
+              readOnly: true
+      initContainers:
+        - name: wait-neo4j
+          image: registry.redhat.io/ubi9/ubi-minimal:9.5
+          command:
+            - sh
+            - -c
+            - |
+              until (echo >/dev/tcp/spcg-neo4j.spcg-control.svc.cluster.local/7687) 2>/dev/null; do
+                echo "waiting for neo4j..."
+                sleep 2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: oauth-ca
+          configMap:
+            name: spcg-oauth-serving-ca
+            optional: true

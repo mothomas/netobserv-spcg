@@ -205,6 +205,7 @@ OpenShift uses the same **base workloads** as vanilla Kubernetes (including **Ne
 | Tier | Command |
 |------|---------|
 | **Small** (default) | `oc apply -k manifests/overlays/openshift-small` |
+| **Secure** (3-namespace split) | `oc apply -k manifests/overlays/openshift-secure` or `./scripts/openshift-secure-apply.sh` |
 | **Medium** | `oc apply -k manifests/overlays/openshift-medium` |
 | **Peak** | `oc apply -k manifests/overlays/openshift-peak` |
 | Base only (same as small) | `oc apply -k manifests/openshift/` |
@@ -296,6 +297,41 @@ Same admission/replica semantics as vanilla tiers; inherit from `manifests/opens
 | `overlays/openshift-peak` | + engine×2, frontend HPA, **Neo4j heap 2G / pagecache 1G** |
 
 Peak Neo4j patch: `overlays/openshift-peak/patch-neo4j-resources.yaml`.
+
+### 6.1 OpenShift secure overlay (`openshift-secure`)
+
+Production-hardened **three-namespace** layout from [SECURE-ARCHITECTURE-PLAN.md](./SECURE-ARCHITECTURE-PLAN.md). Use when landing pods must have **no API proxy egress** and the browser calls the control-plane Route directly.
+
+| Namespace | PSS | Workloads |
+|-----------|-----|-----------|
+| `spcg-landing` | restricted | `spcg-frontend` only |
+| `spcg-control` | restricted | `spcg-ui-portal`, `spcg-neo4j`, OAuth/graph secrets |
+| `pcap-capture` | privileged | `spcg-backend-engine`, ephemeral `spcg-sensor-*` |
+
+**Apply:**
+
+```bash
+./scripts/openshift-secure-apply.sh
+# or: oc apply -k manifests/overlays/openshift-secure
+```
+
+**After apply (cluster admin):**
+
+1. Move or create OAuth secret in **`spcg-control`**:  
+   `oc create secret generic spcg-oauth-client -n spcg-control --from-literal=client-secret=<same-as-OAuthClient>`
+2. Register OAuthClient redirect URI:  
+   `https://$(oc get route spcg-api -n spcg-control -o jsonpath='{.spec.host}')/api/v1/auth/openshift/callback`
+3. Run the apply script (or manually set Route-derived env):  
+   `SPCG_PUBLIC_API_BASE` on `spcg-frontend` (landing), `CORS_ORIGIN` on `spcg-ui-portal` (control, landing Route URL).
+
+**Routes:**
+
+| Route | Namespace | Service | Browser use |
+|-------|-----------|---------|-------------|
+| `spcg` | `spcg-landing` | `spcg-frontend` | UI `/` only |
+| `spcg-api` | `spcg-control` | `spcg-ui-portal` | All `/api/v1/*`, OAuth callback |
+
+**When to use:** `openshift-secure` for production / pen-test profile. Keep `openshift-small` for lab and migration soak (monolithic `pcap-frontend`).
 
 ---
 
