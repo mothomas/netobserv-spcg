@@ -1,12 +1,11 @@
-import { deriveApiBaseFromUiHost, envPublicApiBase } from "./publicApiBase";
+import { envPublicApiBase } from "./publicApiBase";
 
-/** Public API origin (OpenShift spcg-api Route). Empty = same-origin (fails in secure layout). */
+/** Public API origin. Empty = same-origin /api via spcg-frontend in-cluster proxy (secure layout default). */
 export function publicApiBase(): string {
   if (typeof window !== "undefined") {
     const w = window as Window & { __SPCG_API_BASE__?: string };
     if (w.__SPCG_API_BASE__) return w.__SPCG_API_BASE__.replace(/\/$/, "");
-    const derived = deriveApiBaseFromUiHost(window.location.hostname, window.location.protocol);
-    if (derived) return derived;
+    return "";
   }
   return envPublicApiBase();
 }

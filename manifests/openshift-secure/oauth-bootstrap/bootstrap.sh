@@ -179,8 +179,9 @@ fi
 # shellcheck disable=SC2086
 kubectl set env "deployment/spcg-ui-portal" -n "$CONTROL_NS" ${PORTAL_ENV} || true
 
+# Keep API on same-origin /api (frontend proxies in-cluster); do not force browser to spcg-api.
 kubectl set env "deployment/spcg-frontend" -n "$LANDING_NS" \
-  "SPCG_PUBLIC_API_BASE=${API_ORIGIN}" "SPCG_DISABLE_API_PROXY=true"
+  "SPCG_PUBLIC_API_BASE-" "SPCG_DISABLE_API_PROXY=true"
 
 rollout_restart "spcg-ui-portal" "$CONTROL_NS"
 rollout_restart "spcg-frontend" "$LANDING_NS"

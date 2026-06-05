@@ -42,20 +42,17 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if ok {
 		uiBase := strings.TrimSuffix(cfg.FrontendURL, "/")
-		apiBase := strings.TrimSuffix(cfg.PublicAPIBase, "/")
 		if u := auth.CallbackRedirectURLFromRequest(r); u != "" {
 			osCfg["redirect_uri"] = u
 		} else if cfg.RedirectURL != "" {
 			osCfg["redirect_uri"] = cfg.RedirectURL
 		}
 		osCfg["client_id"] = cfg.ClientID
-		if apiBase != "" && apiBase != uiBase {
-			out["public_api_base"] = apiBase
-			osCfg["authorize_url"] = apiBase + "/api/v1/auth/openshift/authorize"
+		// Browser uses authorize_path on Route spcg; frontend proxies to portal (authorize + callback same host).
+		if base := auth.IngressBaseURL(r); base != "" {
+			osCfg["authorize_url"] = base + "/api/v1/auth/openshift/authorize"
 		} else if uiBase != "" {
 			osCfg["authorize_url"] = uiBase + "/api/v1/auth/openshift/authorize"
-		} else if base := auth.IngressBaseURL(r); base != "" {
-			osCfg["authorize_url"] = base + "/api/v1/auth/openshift/authorize"
 		}
 		out["openshift"] = osCfg
 	}

@@ -131,19 +131,14 @@ export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
     if (fb) return fb;
     throw new Error("Invalid JSON from /api/v1/auth/config — is spcg-ui-portal running the correct image?");
   }
-  if (cfg.public_api_base) {
-    setPublicApiBase(cfg.public_api_base);
-  }
+  // Secure layout: keep API on same-origin /api (frontend proxies to portal). Ignore public_api_base.
   return cfg;
 }
 
-/** Redirect browser to OpenShift OAuth (use spcg-api authorize_url when configured). */
-export function startOpenShiftLogin(authorizePath: string, authorizeUrl?: string): void {
-  if (authorizeUrl) {
-    window.location.href = authorizeUrl;
-    return;
-  }
-  window.location.href = apiUrl(authorizePath.startsWith("/") ? authorizePath : `/${authorizePath}`);
+/** Redirect browser to OpenShift OAuth via same-origin /api (frontend proxies authorize + callback). */
+export function startOpenShiftLogin(authorizePath: string, _authorizeUrl?: string): void {
+  const path = authorizePath.startsWith("/") ? authorizePath : `/${authorizePath}`;
+  window.location.href = path;
 }
 
 /** After OAuth callback stored session in sessionStorage. */
@@ -167,7 +162,8 @@ export function authHeaders(sessionId: string): HeadersInit {
 }
 
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(apiUrl(path), { ...init, credentials: init?.credentials ?? "include" });
+  // Session is X-SPCG-Session header, not cookies — avoid credentials:include on cross-origin spcg-api.
+  return fetch(apiUrl(path), { ...init, credentials: init?.credentials ?? "same-origin" });
 }
 
 function kubeconfigPayload(content: string): string {

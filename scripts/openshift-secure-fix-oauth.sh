@@ -74,7 +74,7 @@ fi
 oc set env "deployment/spcg-ui-portal" -n "$CONTROL_NS" "${PORTAL_ENV[@]}"
 oc set env "deployment/spcg-frontend" -n "$LANDING_NS" \
   "SPCG_AUTH_METHODS=openshift,kubeconfig" \
-  "SPCG_PUBLIC_API_BASE=${API_ORIGIN}" \
+  "SPCG_PUBLIC_API_BASE-" \
   "SPCG_DISABLE_API_PROXY=true"
 
 oc rollout restart "deployment/spcg-ui-portal" -n "$CONTROL_NS"
