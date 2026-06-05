@@ -25,7 +25,7 @@ The Job (`oauth-bootstrap/`) runs in-cluster and:
 
 **RBAC:** Job SA needs cluster permission to manage `oauthclients` (same class as Argo CD Operator SSO). Platform team applies the manifest once.
 
-**Bootstrap image:** `registry.redhat.io/ubi9/ubi-minimal:9.5` debug container — no `oc`/CLI image; `bootstrap.sh` uses **curl** against the in-cluster Kubernetes API.
+**Bootstrap image:** OCP **debug tools** (`openshift/tools:latest` from cluster registry — same as `oc debug --image-stream openshift/tools:latest`). Fallback: `oauth-bootstrap/patch-debug-image-support-tools.yaml` (`registry.redhat.io/rhel9/support-tools:latest`). Not `openshift/cli`.
 
 Manifests include a **placeholder** `spcg-oauth-client` secret so the portal can start; the Job replaces it and restarts portal/frontend. If you applied an older revision without the placeholder:
 

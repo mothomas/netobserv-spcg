@@ -1,0 +1,14 @@
+# Apply when openshift/tools imagestream is missing (oc debug falls back to this image):
+#   oc apply -k manifests/openshift-secure
+#   oc apply -f manifests/openshift-secure/oauth-bootstrap/patch-debug-image-support-tools.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spcg-oauth-bootstrap
+  namespace: spcg-control
+spec:
+  template:
+    spec:
+      containers:
+        - name: debug
+          image: registry.redhat.io/rhel9/support-tools:latest
