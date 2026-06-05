@@ -213,24 +213,26 @@ OpenShift uses the same **base workloads** as vanilla Kubernetes (including **Ne
 
 | File / patch | Purpose |
 |--------------|---------|
-| `openshift/rbac-capture.yaml` | `pcap-executor` RBAC + **SCC `privileged`** binding |
-| `openshift/route-openshift.yaml` | Routes `spcg` (UI) and `spcg-api` (`/api`, 5m HAProxy timeout for SSE) |
-| `openshift/patches/neo4j-pod-security.yaml` | `fsGroup: 7474` for restricted PSS (Small uses **emptyDir**) |
-| `openshift/neo4j-pvc.yaml` | **10Gi** PVC — applied on **openshift-medium/peak** only (not small) |
-| `openshift/patches/service-frontend-clusterip.yaml` | Removes NodePort; Routes provide ingress |
-| `openshift/patches/tolerations.yaml` | control-plane / master / Cilium tolerations (incl. **Neo4j**) |
-| `openshift/kustomization.yaml` | Image tags **`small-20260614`** for all three SPCG images |
+| `openshift/config-auth-openshift.yaml` | `SPCG_AUTH_METHODS=openshift,kubeconfig` |
+| `openshift/rbac-capture.yaml` | `pcap-executor` RBAC + **SCC `privileged`** |
+| `openshift/rbac-portal-oauth.yaml` | Route reader RBAC for **`default` SA** |
+| `openshift/route-openshift.yaml` | Routes `spcg` (UI) and `spcg-api` (OAuth authorize only) |
+| `openshift/patches/ui-portal-auth-openshift.yaml` | OAuth env, `default` SA, optional oauth CA mount |
+| `openshift/patches/frontend-auth-openshift.yaml` | Auth ConfigMap on frontend |
+| `openshift/patches/neo4j-pod-security.yaml` | OpenShift restricted UID assignment |
+| `openshift/patches/quay-explicit-images.yaml` | Pin **quay.io/moby** image tags |
+| `openshift/kustomization.yaml` | Image rewrites (portal `small-20260606`, frontend `small-20260607`) |
 
-Neo4j remains **ClusterIP-only** (bolt `:7687`); ui-portal connects via `NEO4J_URI` from base `deployment-frontend.yaml`.
+**Security:** [openshift-security.md](./openshift-security.md)
 
 ### 5.3 Routes
 
-| Route | Service | Path | TLS |
-|-------|---------|------|-----|
-| `spcg` | `spcg-frontend` | `/` | edge, redirect HTTP |
-| `spcg-api` | `spcg-ui-portal` | `/api` | edge, **5m timeout** (SSE capture stream) |
+| Route | Service | Use |
+|-------|---------|-----|
+| `spcg` | `spcg-frontend` | **All browser traffic** — UI + `/api/*` proxy to portal |
+| `spcg-api` | `spcg-ui-portal` | **OAuth authorize redirect only** (not browser XHR) |
 
-**Why two routes:** Next.js serves UI on `/` while API can be pinned to Go portal for large SSE payloads; also supports splitting TLS policies later.
+Browser JSON APIs must stay on Route `spcg` (same origin). Route `spcg-api` avoids CORS issues for OAuth start URL only.
 
 ### 5.4 Security Context Constraints (SCC)
 

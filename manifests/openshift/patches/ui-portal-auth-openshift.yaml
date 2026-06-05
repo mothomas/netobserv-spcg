@@ -1,4 +1,4 @@
-# OpenShift: Argo CD–style login — cluster Routes + OAuth client secret only (no domain env).
+# OpenShift OAuth: Route discovery, token exchange env, optional oauth serving CA mount.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,7 +7,6 @@ metadata:
 spec:
   template:
     spec:
-      # Explicit "default" overwrites stale serviceAccountName: spcg-ui-portal on oc apply.
       serviceAccountName: default
       automountServiceAccountToken: true
       containers:
@@ -16,8 +15,6 @@ spec:
             - configMapRef:
                 name: spcg-auth-env
           env:
-            - name: SPCG_AUTH_METHODS
-              value: openshift
             - name: OAUTH_CLIENT_ID
               value: spcg-ui
             - name: OAUTH_CLIENT_SECRET
@@ -25,6 +22,16 @@ spec:
                 secretKeyRef:
                   name: spcg-oauth-client
                   key: client-secret
-            # Token POST uses oauth-openshift Route TLS; ingress CA is often not in the container trust store (Argo insecureCA).
             - name: OAUTH_TLS_INSECURE_SKIP_VERIFY
               value: "true"
+            - name: OAUTH_CA_BUNDLE
+              value: /etc/oauth-ca/ca-bundle.crt
+          volumeMounts:
+            - name: oauth-ca
+              mountPath: /etc/oauth-ca
+              readOnly: true
+      volumes:
+        - name: oauth-ca
+          configMap:
+            name: spcg-oauth-serving-ca
+            optional: true

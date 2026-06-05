@@ -1,246 +1,144 @@
-# SPCG application architecture
+# SPCG architecture
 
-Secure Packet Capture Gateway (SPCG) is a **namespace-scoped, zero-trust** observability product that wraps [netobserv-cli](https://github.com/netobserv/netobserv-cli) / [netobserv-ebpf-agent](https://github.com/netobserv/netobserv-ebpf-agent) with a browser UI, admission-controlled captures, and optional graph + AI triage.
+Secure Packet Capture Gateway — namespace-scoped netobserv capture with a browser UI, admission limits, and optional Neo4j graph + AI triage.
 
-**Target hardened layout** (landing / control / capture split, K8s gateway, ephemeral sensors only): [SECURE-ARCHITECTURE-PLAN.md](./SECURE-ARCHITECTURE-PLAN.md).
-
----
-
-## 1. Design ideology
-
-### 1.1 Problems we optimize for
-
-| Problem | Approach |
-|---------|----------|
-| PCAP tools need cluster-admin or host access | User brings **their own** kubeconfig/OAuth token; portal impersonates that identity for list/capture only |
-| Raw packets in the browser | **Thin frontend**: SSE metrics + aggregated topology; PCAP via download or presigned S3 URL |
-| Multi-tenant graph leakage | Neo4j nodes keyed by `captureId` + `authSessionId`; labels encrypted with per-session material |
-| Capture plane is inherently privileged | **Split namespaces**: privileged `pcap-capture` vs restricted `pcap-frontend` |
-| High packet rates break the UI | **Bounded topology** (sampled events, capped nodes/edges); observability API separate from heavy AI/Neo4j sync |
-| Long / large captures OOM the portal | **Tiered retention**: RAM PCAP with byte/time caps (Small); mandatory S3 streaming (Medium/Peak) |
-
-### 1.2 Core concepts
-
-| Concept | Definition |
-|---------|------------|
-| **Auth session** | UI login session (`X-SPCG-Session`). Holds kubeconfig or bearer token in memory on `spcg-ui-portal` only. |
-| **Capture session** | One active or completed capture (`capture_session_id`). Owns flow metadata, PCAP path (RAM or S3), Neo4j subgraph. |
-| **Capture plane** | `pcap-capture`: engine + per-session eBPF DaemonSets. |
-| **Control plane (UI)** | `pcap-frontend`: Next.js + ui-portal + Neo4j. |
-| **Sensor** | `spcg-sensor-{captureId}` DaemonSet: hostNetwork netobserv agent exporting gRPC flows to engine collector ports `19000–19999`. |
-| **Admission** | ConfigMap-driven limits (`MAX_*`, `S3_OFFLOAD_ENABLED`) enforced in `internal/capture/admission` before SSE stream starts. |
-| **Bounded graph** | Topology built from last N events with max nodes/edges for UI refresh under scan stress. |
-
-### 1.3 Architectural style
-
-- **Microservices (two binaries + optional Neo4j)**, not a monolith: engine never serves HTTP to users; portal never runs eBPF.
-- **Event-driven capture path**: gRPC stream from engine → portal → SSE to browser.
-- **Configuration as data**: tier differences are Kustomize overlays + ConfigMap, not compile-time forks.
-- **Fail closed on auth**: missing/invalid session → 401; capture ownership checked per API (`capture_registry.go`).
+**OpenShift security:** [openshift-security.md](./openshift-security.md)  
+**Deploy:** [DEPLOYMENT.md](./DEPLOYMENT.md)  
+**Future hardened split:** [SECURE-ARCHITECTURE-PLAN.md](./SECURE-ARCHITECTURE-PLAN.md)
 
 ---
 
-## 2. Logical component model
+## 1. Design principles
+
+| Principle | Implementation |
+|-----------|----------------|
+| User identity, not portal SA | All K8s list/capture uses uploaded **OAuth token** or **kubeconfig** |
+| Thin browser | Next.js proxies `/api/*`; SSE metrics; PCAP via download/S3 |
+| Privilege isolation | `pcap-capture` privileged; `pcap-frontend` restricted PSS |
+| Fail closed | Invalid session → 401; capture ownership checked per request |
+| Tier via config | Small/Medium/Peak = Kustomize overlays + admission ConfigMap |
+
+---
+
+## 2. Runtime topology
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         User browser                                     │
-│  spcg-frontend (Next.js) — static UI, proxies /api/v1 → ui-portal       │
-└───────────────────────────────┬─────────────────────────────────────────┘
-                                │ HTTPS (REST + SSE)
-┌───────────────────────────────┴─────────────────────────────────────────┐
-│  pcap-frontend (Pod Security: restricted)                                │
-│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────────┐ │
-│  │ spcg-ui-portal  │  │ spcg-neo4j       │  │ ConfigMap admission │ │
-│  │ Go HTTP API     │──│ optional graph   │  │ + secrets (graph,   │ │
-│  │ auth, capture,  │  │ Sigma layout     │  │  neo4j password)    │ │
-│  │ graph, AI       │  └──────────────────┘  └─────────────────────┘ │
-│  └────────┬────────┘                                                     │
-└───────────┼─────────────────────────────────────────────────────────────┘
-            │ gRPC CaptureService (TLS optional via spcg-engine-mtls)
-┌───────────┴─────────────────────────────────────────────────────────────┐
-│  pcap-capture (Pod Security: privileged)                                   │
-│  ┌──────────────────────┐     ┌────────────────────────────────────────┐ │
-│  │ spcg-backend-engine  │◄────│ spcg-sensor-{session} (DaemonSet)      │ │
-│  │ deploy DS, collectors│     │ hostNetwork, netobserv-ebpf-agent      │ │
-│  └──────────────────────┘     └────────────────────────────────────────┘ │
-└───────────────────────────────┬─────────────────────────────────────────┘
-                                │ User Kubernetes API (443/6443)
+┌─────────────────────────────────────────────────────────────────┐
+│ Browser → Route spcg (HTTPS)                                     │
+│   spcg-frontend (Next.js)  ──middleware /api/*──► spcg-ui-portal │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ gRPC (optional mTLS)
+┌───────────────────────────────▼─────────────────────────────────┐
+│ pcap-capture (privileged)                                        │
+│   spcg-backend-engine ◄── spcg-sensor-{session} (DaemonSet)      │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ User K8s API (443)
                                 ▼
-                     Workloads under capture (pods, owners)
+                     Pods / workloads in selected namespaces
 ```
 
-### 2.1 Binaries and images
+| Image | Role |
+|-------|------|
+| `spcg-frontend` | Static UI, `/api` reverse proxy to portal |
+| `spcg-ui-portal` | Auth, REST/SSE, PCAP session, Neo4j, AI |
+| `spcg-backend-engine` | gRPC, sensor lifecycle, flow collectors |
+| `neo4j:5.26-community` | Optional graph (base manifest) |
+| `netobserv-ebpf-agent` | Per-capture DaemonSet (dynamic) |
 
-| Image | Source | Responsibility |
-|-------|--------|----------------|
-| `spcg-backend-engine` | `cmd/backend-engine` | gRPC server, sensor lifecycle, in-process flow collectors |
-| `spcg-ui-portal` | `cmd/ui-portal` | REST/SSE, auth, PCAP session store, Neo4j sync, AI proxy |
-| `spcg-frontend` | `frontend/` (Next.js) | Dashboard, graph rendering, capture UX |
-| `neo4j:5.26-community` | Upstream | Graph persistence (optional operationally, wired in base) |
-| `netobserv-ebpf-agent` | Quay (overridable) | Deployed dynamically per capture by engine |
+**Quay (OpenShift):** `quay.io/moby/spcg-frontend`, `spcg-ui-portal`, `spcg-backend-engine` — tags in `manifests/openshift/kustomization.yaml`.
 
 ---
 
-## 3. End-to-end data flows
+## 3. Authentication flows
 
-### 3.1 Authentication and workload discovery
+### 3.1 OpenShift OAuth
 
 ```mermaid
 sequenceDiagram
-  participant U as User
+  participant U as Browser
   participant F as spcg-frontend
   participant P as spcg-ui-portal
-  participant K as Kubernetes API
+  participant O as oauth-openshift
+  participant K as K8s API
 
-  U->>F: Login (kubeconfig file or bearer token)
+  U->>F: Log in via OpenShift
+  F->>P: GET /api/v1/auth/openshift/authorize (proxied)
+  P->>O: Redirect authorize (client_id, redirect_uri, state)
+  O->>U: Cluster login
+  O->>F: Callback ?code&state on Route spcg
+  F->>P: GET callback (proxied)
+  P->>O: POST /oauth/token (code + secret)
+  O-->>P: access_token
+  P->>K: SelfSubjectReview (user token)
+  P-->>F: Redirect /auth/callback?session_id=
+  F->>P: GET /api/v1/namespaces (X-SPCG-Session)
+  P->>K: List as user
+```
+
+- Redirect URI: `https://<route-spcg>/api/v1/auth/openshift/callback`
+- Token URL: `https://<oauth-openshift>/oauth/token` (discovered; not legacy `oauth.openshift.svc`)
+- Portal uses **`default` SA** + Route reader RBAC; user token on all API calls
+
+### 3.2 Kubeconfig (optional)
+
+```mermaid
+sequenceDiagram
+  participant U as Browser
+  participant F as spcg-frontend
+  participant P as spcg-ui-portal
+  participant K as K8s API
+
+  U->>F: Upload / paste kubeconfig
   F->>P: POST /api/v1/auth/login
-  P->>P: auth.Store — credentials in RAM
+  P->>K: Validate credentials
   P-->>F: session_id
-  U->>F: Pick namespace / workloads
-  F->>P: GET /api/v1/namespaces, workloads (X-SPCG-Session)
-  P->>K: List/watch as user identity
-  K-->>P: RBAC-filtered resources
-  P-->>F: JSON
 ```
 
-**Why:** Portal SA is not cluster-admin. All workload operations use the **uploaded identity** (`internal/k8s/user_client.go`, `impersonation.go`).
-
-### 3.2 Capture start (control + data plane)
-
-```mermaid
-sequenceDiagram
-  participant F as spcg-frontend
-  participant P as spcg-ui-portal
-  participant A as admission
-  participant E as spcg-backend-engine
-  participant S as spcg-sensor DS
-  participant K as Kubernetes API
-
-  F->>P: POST /api/v1/capture/stream (SSE)
-  P->>A: ValidateStart (limits, S3 policy)
-  P->>P: pcap.NewSession / NewSessionWithS3
-  P->>E: gRPC StreamPackets(target pods)
-  E->>K: Create DaemonSet spcg-sensor-{id}
-  S->>E: Flow records → collector :19000-19999
-  E->>P: CaptureChunk stream
-  P->>P: AppendFlow, analytics, topology
-  P-->>F: SSE events (metrics, pod_refresh, limits)
-```
-
-**Key files:**
-
-- SSE handler: `internal/portal/handlers.go` (`handleCaptureStream`)
-- Admission: `internal/capture/admission/limits.go`
-- Session: `internal/pcap/session.go`
-- Engine: `internal/capture/grpc_server.go`
-- Sensor deploy: `internal/capture/sensor/manager.go`, embedded `packet-capture-daemonset.yaml`
-
-### 3.3 PCAP retention paths
-
-| Mode | When | Path | Storage |
-|------|------|------|---------|
-| **RAM** | Small tier, `S3_OFFLOAD_ENABLED=false` | Frames buffered in portal process | `MAX_CAPTURE_BYTES`, `MAX_CAPTURE_DURATION` |
-| **S3** | Medium/Peak or user enables S3 | Multipart upload from portal | Tenant bucket; metadata only in portal (`internal/pcap/s3sink.go`) |
-
-**Why S3 at higher tiers:** prevents OOM on long incident captures while keeping the browser thin (presigned download URL only).
-
-### 3.4 Observability UI refresh (stats + graph)
-
-```mermaid
-sequenceDiagram
-  participant F as spcg-frontend
-  participant P as spcg-ui-portal
-  participant N as Neo4j
-
-  loop every 8s while capturing
-    F->>P: POST /api/v1/capture/observability
-    P->>P: BuildBoundedTopology (sample + cap)
-    P-->>F: topology, capture_summary, graph_capped flags
-    F->>P: POST /api/v1/graph/topology
-    P->>P: SigmaGraphFromTopology (in-memory)
-    opt small graph, Neo4j enabled
-      P->>N: ReplaceTopology (async)
-    end
-    P-->>F: Sigma nodes/edges
-  end
-```
-
-**Why split observability vs graph:**
-
-- Observability must stay fast under stress (no JSONL export, no blocking Neo4j wipe).
-- Graph can fail soft without clearing stats (`frontend/app/page.tsx`).
-
-**Limits:** `internal/pcap/topology_limits.go` — 2500 events, 100 nodes, 150 edges.
-
-### 3.5 AI analyst (optional, scrubbed)
-
-1. User opens AI modal → `POST /api/v1/ai/context` (JSONL preview + bounded topology).
-2. Chat → `POST /api/v1/ai/chat` with `internal/ai/scrubber.go` redacting IPs/MACs/tokens before provider call.
-3. Graph context built in `internal/portal/graphcontext.go` (not full raw PCAP).
-
-**Why scrub:** LLM providers are often outside the airgap boundary; scrubbing is defense in depth even when using public APIs.
-
-### 3.6 Geo / flags (airgap)
-
-- No live geo HTTP APIs.
-- `frontend/public/ip-country-map.json` (DB-IP Lite derived, v3 IPv4+IPv6) + `frontend/lib/ipCountryLookup.ts`.
+Enabled when `SPCG_AUTH_METHODS` includes `kubeconfig` (default OpenShift overlay: `openshift,kubeconfig`).
 
 ---
 
-## 4. Decision log (why we chose X)
+## 4. Capture flow (summary)
 
-| Decision | Alternatives considered | Why we chose this | Trade-off |
-|----------|----------------------|-------------------|-----------|
-| Two namespaces | Single namespace | Clear blast radius; frontend PSS restricted | More NetworkPolicies to maintain |
-| Per-session DaemonSet | Single shared sensor | Matches netobserv-cli model; simpler pod targeting | More DS churn at high concurrency |
-| In-process collectors on engine | Sidecar per sensor | Fewer moving parts today | Engine must scale for Peak (2 replicas) |
-| Portal owns PCAP bytes | Engine writes S3 | User credentials never on capture plane | Portal memory pressure on Small |
-| Neo4j optional | Only in-memory graph | Persistent subgraph for Sigma + AI context | Another datastore to secure |
-| Kustomize tiers | Helm values only | GitOps-friendly overlays; Small default | OpenShift tier combo needs manual merge (see DEPLOYMENT.md) |
-| User kubeconfig in RAM | Cluster-wide portal SA | True zero-trust listing/capture | No HA session affinity without sticky + future Redis |
-| Bounded topology | Full graph every 4s | Survives zmap/lab stress tests | Top-N flows only when capped |
-| Async Neo4j sync | Sync on every graph request | UI stays responsive | Graph DB may lag seconds behind live capture |
-| mTLS optional secret | Mandatory TLS everywhere | Easier lab bootstrap | Insecure gRPC if secret not mounted |
-| Offline IP country DB | ipwho.is / MaxMind live | Airgap UI requirement | ~40MB static asset in frontend image |
+1. User selects namespaces → workloads (`POST /api/v1/workloads`)
+2. **Start capture** → admission check → engine deploys sensor DS → SSE stream to browser
+3. **Stop** → teardown sensor, PCAP download or S3 presigned URL
+4. Optional Neo4j sync + AI diagnostic modal
+
+See prior sections in git history for detailed sequence diagrams; behavior unchanged.
 
 ---
 
-## 5. Tier behavior (application view)
+## 5. OpenShift-specific components
 
-Tiers change **ConfigMap admission** and **replica/resource patches** only. Application binaries are identical.
+| Piece | Location |
+|-------|----------|
+| Routes `spcg`, `spcg-api` | `manifests/openshift/route-openshift.yaml` |
+| OAuth RBAC | `manifests/openshift/rbac-portal-oauth.yaml` |
+| Auth ConfigMap | `manifests/openshift/config-auth-openshift.yaml` |
+| Capture privileged SCC | `manifests/openshift/rbac-capture.yaml` |
+| Overlay entry | `manifests/overlays/openshift-small` |
 
-| Setting | Small | Medium | Peak |
-|---------|-------|--------|------|
-| `MAX_CONCURRENT_SESSIONS` | 2 | 5 | 8 |
-| `MAX_PODS_PER_SESSION` | 10 | 15 | 20 |
-| `MAX_CAPTURE_DURATION` | 15m | 30m | 60m |
-| `S3_OFFLOAD_ENABLED` | false | true | true |
-| Frontend replicas | 1 | 2 | 3 (+ HPA) |
-| Engine replicas | 1 | 1 | 2 |
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for exact manifest paths and [architecture-tiers.md](./architecture-tiers.md) for capacity planning.
+**Apply:** `oc apply -k manifests/overlays/openshift-small` + OAuthClient ([examples/openshift-oauth/README.md](./examples/openshift-oauth/README.md)).
 
 ---
 
-## 6. Security architecture (summary)
+## 6. Key code paths
 
-| Layer | Control |
-|-------|---------|
-| Identity | Per-user kubeconfig/bearer; wiped on logout |
-| Capture authorization | `capture_registry` maps capture ID → auth session |
-| Network | Default-deny NP; narrow egress/ingress per namespace |
-| Frontend pods | non-root, drop caps, read-only rootfs, no SA token automount |
-| Capture pods | privileged engine + hostNetwork sensors (required for eBPF) |
-| Graph | Tenant label encryption (`internal/graph/tenantcrypto`) |
-| AI | Scrubber + optional provider keys in memory only |
-
-**Hardening backlog (do not remove features — see README Security TODO):** placeholder secrets, optional insecure gRPC, in-memory sessions, broad egress to 443, etc.
+| Concern | Path |
+|---------|------|
+| OAuth discovery | `internal/auth/openshift_discover.go` |
+| Token exchange + TLS | `internal/auth/oauth.go` |
+| User bearer client | `internal/k8s/impersonation.go` |
+| OAuth handlers | `internal/portal/auth_oauth_handlers.go` |
+| API proxy | `frontend/middleware.ts` |
+| Auth UI | `frontend/app/page.tsx` |
 
 ---
 
-## 7. Related reading
+## 7. What we deliberately do not do
 
-- [DEPLOYMENT.md](./DEPLOYMENT.md) — manifests, OpenShift SCC, overlay chain
-- [CODE-STRUCTURE.md](./CODE-STRUCTURE.md) — packages and conventions
-- [neo4j-graph.md](./neo4j-graph.md) — graph tenancy detail
+- Portal SA is not cluster-admin
+- Browser does not call `spcg-api` for JSON APIs (same-origin proxy only)
+- No Dex sidecar — portal implements OAuth like Argo CD’s connector pattern
+- No troubleshoot/debug panel in production UI (removed)

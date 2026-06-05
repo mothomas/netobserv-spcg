@@ -1,8 +1,8 @@
-# Shared OpenShift login mode (envFrom on frontend + ui-portal).
+# Auth modes for OpenShift: primary OAuth + optional kubeconfig upload (break-glass).
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: spcg-auth-env
   namespace: pcap-frontend
 data:
-  SPCG_AUTH_METHODS: openshift
+  SPCG_AUTH_METHODS: openshift,kubeconfig

@@ -73,21 +73,6 @@ export type LoginResponse = {
 };
 
 import { apiUrl } from "./apiBase";
-import { isTroubleshootMode, ts, type TroubleshootEntry } from "./troubleshoot";
-
-let troubleshootTrace: TroubleshootEntry[] = [];
-
-export function getTroubleshootTrace(): TroubleshootEntry[] {
-  return [...troubleshootTrace];
-}
-
-function trace(step: string, detail?: string) {
-  const entry = { at: ts(), step, detail };
-  troubleshootTrace = [...troubleshootTrace.slice(-40), entry];
-  if (isTroubleshootMode()) {
-    console.info("[spcg-ui]", step, detail ?? "");
-  }
-}
 
 export { apiUrl } from "./apiBase";
 
@@ -97,18 +82,15 @@ export type AuthConfigResponse = {
   openshift?: { authorize_path: string; authorize_url?: string; error?: string };
 };
 
-/** Set API base at runtime after /auth/config (OpenShift Route discovery). */
+/** Set API base at runtime (server-side / legacy; browser uses same-origin /api proxy). */
 export function setPublicApiBase(base: string): void {
   if (typeof window === "undefined" || !base) return;
   (window as Window & { __SPCG_API_BASE__?: string }).__SPCG_API_BASE__ = base.replace(/\/$/, "");
 }
 
 export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
-  const url = apiUrl("/api/v1/auth/config");
-  trace("fetchAuthConfig", url);
-  const res = await fetch(url, { cache: "no-store", credentials: "include" });
+  const res = await fetch(apiUrl("/api/v1/auth/config"), { cache: "no-store", credentials: "include" });
   const bodyText = await res.text();
-  trace("fetchAuthConfig response", `${res.status} len=${bodyText.length}`);
   if (!res.ok) {
     const short =
       bodyText.startsWith("<!DOCTYPE") || bodyText.startsWith("<html")

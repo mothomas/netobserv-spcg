@@ -14,8 +14,10 @@ See [ARGO-CD-PARITY.md](./ARGO-CD-PARITY.md) for a full mapping.
 
 | Goal | Apply |
 |------|--------|
-| **OpenShift login** (Argo-style) | `manifests/overlays/openshift-small` + OAuthClient below |
-| **Kubeconfig only** (how it worked before OCP auth) | `manifests/overlays/openshift-kubeconfig` |
+| **OpenShift login + kubeconfig upload** (default) | `manifests/overlays/openshift-small` + OAuthClient below |
+| **Kubeconfig only** | `manifests/overlays/openshift-kubeconfig` |
+
+Default overlay sets `SPCG_AUTH_METHODS=openshift,kubeconfig`. Production may set `openshift` only — see [openshift-security.md](../../openshift-security.md).
 
 ## OpenShift login setup
 
@@ -26,7 +28,7 @@ oc get route spcg -n pcap-frontend
 oc apply -k manifests/overlays/openshift-small
 ```
 
-Requires **`spcg-ui-portal:small-20260624+`** and **`spcg-frontend:small-20260624+`**. If Docker Hub rate-limits pulls, see [openshift-dockerhub-pull-secret.md](../../openshift-dockerhub-pull-secret.md).
+Images: **quay.io/moby** — portal `small-20260606+`, frontend `small-20260607+` (amd64).
 
 ### 2. OAuthClient (cluster admin) — same idea as Argo CD
 
@@ -47,8 +49,9 @@ oc create secret generic spcg-oauth-client -n pcap-frontend \
 
 ### 3. Portal RBAC + env (from kustomize)
 
-- `manifests/openshift/rbac-portal-oauth.yaml` — Route `get` for namespace **`default`** SA (same as frontend; no cluster-admin SCC binding)
-- `SPCG_AUTH_METHODS=openshift`, `OAUTH_CLIENT_ID=spcg-ui`, secret `spcg-oauth-client`
+- `manifests/openshift/rbac-portal-oauth.yaml` — Route `get` for **`default` SA**
+- `SPCG_AUTH_METHODS=openshift,kubeconfig` via **`spcg-auth-env`** ConfigMap
+- Secret **`spcg-oauth-client`** (OAuth only; kubeconfig path does not need it)
 
 ```bash
 oc apply -k manifests/overlays/openshift-small

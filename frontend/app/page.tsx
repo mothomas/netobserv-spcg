@@ -9,9 +9,7 @@ import { Sidebar, type AppSection } from "@/components/layout/Sidebar";
 import { type CaptureSummary, type FlowTopology } from "@/lib/ai";
 import { emptyTopology, normalizeTopology } from "@/lib/topology";
 import { fetchGraphTopology, normalizeSigmaGraph, type SigmaGraph } from "@/lib/graph";
-import { TroubleshootPanel } from "@/components/TroubleshootPanel";
 import { isKubeconfigAuthMode, isOpenShiftAuthMode } from "@/lib/authMode";
-import { isTroubleshootMode } from "@/lib/troubleshoot";
 import {
   fetchNamespaces,
   fetchWorkloads,
@@ -24,7 +22,6 @@ import {
   type NamespaceRow,
   type NamespaceWorkloads,
   type PodDetail,
-  getTroubleshootTrace,
   loginWithKubeconfig,
   fetchAuthConfig,
   startOpenShiftLogin,
@@ -64,7 +61,6 @@ type PodMetrics = {
 export default function Home() {
   const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [troubleshootTrace, setTroubleshootTrace] = useState<ReturnType<typeof getTroubleshootTrace>>([]);
   const [kubeconfigText, setKubeconfigText] = useState("");
   const [session, setSession] = useState<LoginResponse | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
@@ -160,10 +156,7 @@ export default function Home() {
           `${e instanceof Error ? e.message : String(e)} — check spcg-frontend and spcg-ui-portal pods and Route spcg.`
         )
       )
-      .finally(() => {
-        setAuthLoading(false);
-        if (isTroubleshootMode()) setTroubleshootTrace(getTroubleshootTrace());
-      });
+      .finally(() => setAuthLoading(false));
   }, []);
 
   useEffect(() => {
@@ -595,9 +588,11 @@ export default function Home() {
             </div>
           </div>
           <p className="text-siem-muted text-sm mb-4">
-            {openshiftLogin
-              ? "Log in with your OpenShift username and password on the cluster login page. Access follows your RoleBindings."
-              : "Upload a kubeconfig for your Kubernetes cluster. Credentials stay in session memory only and are wiped on sign out."}
+            {openshiftLogin && kubeconfigLogin
+              ? "Primary: OpenShift login (RBAC from your cluster identity). Alternative: upload a kubeconfig for break-glass or lab use."
+              : openshiftLogin
+                ? "Log in with your OpenShift account. Access follows your RoleBindings."
+                : "Upload a kubeconfig. Credentials stay in portal memory only and are cleared on sign out."}
           </p>
           {!authLoading && loginError && (
             <p className="mb-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>
@@ -620,13 +615,16 @@ export default function Home() {
           )}
           {kubeconfigLogin && (
             <>
-              {authConfig?.openshift && (
-                <p className="text-xs text-siem-muted mb-2 text-center">— or use kubeconfig (lab / break-glass) —</p>
+              {openshiftLogin && (
+                <p className="text-xs text-siem-muted mb-3 text-center border-t border-siem-border pt-4">
+                  Or upload kubeconfig
+                </p>
               )}
+              <label className="block text-xs text-siem-muted mb-1">Kubeconfig file</label>
               <input
                 type="file"
                 accept=".yaml,.yml,.config"
-                className="w-full text-sm mb-2 text-siem-muted"
+                className="w-full text-sm mb-3 text-siem-muted"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
@@ -636,12 +634,11 @@ export default function Home() {
                 }}
               />
               <textarea
-                className="siem-input h-40 font-mono text-xs"
-                placeholder="Paste kubeconfig YAML"
+                className="siem-input h-32 font-mono text-xs"
+                placeholder="Or paste kubeconfig YAML"
                 value={kubeconfigText}
                 onChange={(e) => setKubeconfigText(e.target.value)}
               />
-              {loginError && <p className="mt-3 text-sm text-siem-err whitespace-pre-wrap">{loginError}</p>}
               <button
                 type="button"
                 className="mt-4 w-full fluent-tab-inactive py-2.5 border border-siem-border"
@@ -651,23 +648,12 @@ export default function Home() {
               </button>
             </>
           )}
-          {authLoading && <p className="text-sm text-siem-muted">Loading sign-in options…</p>}
+          {authLoading && <p className="text-sm text-siem-muted mt-4">Loading sign-in options…</p>}
           {!authLoading && !openshiftLogin && !kubeconfigLogin && (
             <p className="text-sm text-siem-muted">
-              No sign-in methods are configured. Set <code className="text-siem-text">SPCG_AUTH_METHODS</code> on
-              spcg-frontend and spcg-ui-portal, or fix <code className="text-siem-text">/api/v1/auth/config</code> on the
-              portal (image tag small-20260621+).
+              No sign-in methods configured. Set <code className="text-siem-text">SPCG_AUTH_METHODS</code> on
+              spcg-frontend and spcg-ui-portal.
             </p>
-          )}
-          {isTroubleshootMode() && (
-            <TroubleshootPanel
-              authConfig={authConfig}
-              authLoading={authLoading}
-              loginError={loginError}
-              trace={troubleshootTrace}
-              openshiftLogin={openshiftLogin}
-              kubeconfigLogin={kubeconfigLogin}
-            />
           )}
         </div>
       </main>

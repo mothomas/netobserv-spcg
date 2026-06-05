@@ -1,4 +1,4 @@
-# Runtime OpenShift login mode for UI (matches portal SPCG_AUTH_METHODS).
+# Inject shared auth ConfigMap (SPCG_AUTH_METHODS) into Next.js.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,6 +12,3 @@ spec:
           envFrom:
             - configMapRef:
                 name: spcg-auth-env
-          env:
-            - name: SPCG_AUTH_METHODS
-              value: openshift
