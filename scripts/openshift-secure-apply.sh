@@ -8,11 +8,13 @@ FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260616}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "Applying greenfield openshift-secure manifests..."
-if ! oc get secret spcg-oauth-client -n "$CONTROL_NS" >/dev/null 2>&1; then
-  echo "NOTE: create OAuth secret first (portal will not start without it):"
-  echo "  oc create secret generic spcg-oauth-client -n ${CONTROL_NS} --from-literal=client-secret=<secret>"
-fi
 oc apply -k "${REPO_ROOT}/manifests/openshift-secure"
+
+echo "Bootstrapping OAuth (Argo CD–style: auto OAuthClient + secret)..."
+if ! SPCG_OAUTH_LAYOUT=secure "${REPO_ROOT}/scripts/openshift-oauth-bootstrap.sh"; then
+  echo "WARN: OAuth bootstrap failed (need cluster-admin for oauthclients?)." >&2
+  echo "  Retry: SPCG_OAUTH_LAYOUT=secure ${REPO_ROOT}/scripts/openshift-oauth-bootstrap.sh" >&2
+fi
 
 UI_HOST="$(oc get route spcg -n "$LANDING_NS" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
 API_HOST="$(oc get route spcg-api -n "$CONTROL_NS" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
@@ -25,11 +27,6 @@ else
     "SPCG_PUBLIC_API_BASE=${API_HOST}" "SPCG_DISABLE_API_PROXY=true"
   oc set env "deployment/spcg-ui-portal" -n "$CONTROL_NS" \
     "CORS_ORIGIN=${UI_HOST}"
-fi
-
-echo "Ensuring OAuth secret exists in ${CONTROL_NS}..."
-if ! oc get secret spcg-oauth-client -n "$CONTROL_NS" >/dev/null 2>&1; then
-  echo "Create secret: oc create secret generic spcg-oauth-client -n ${CONTROL_NS} --from-literal=client-secret=<secret>"
 fi
 
 echo "Syncing oauth serving CA to ${CONTROL_NS}/spcg-oauth-serving-ca (optional TLS trust)..."
@@ -62,11 +59,9 @@ oc rollout status "deployment/spcg-ui-portal" -n "$CONTROL_NS" --timeout=5m
 oc rollout status "deployment/spcg-frontend" -n "$LANDING_NS" --timeout=5m
 
 echo ""
-echo "=== OAuth redirect URI (register on OAuthClient spcg-ui) ==="
+echo "=== OAuth redirect URI (OAuthClient spcg-ui — created by bootstrap) ==="
 if [ -n "$API_HOST" ]; then
   echo "${API_HOST}/api/v1/auth/openshift/callback"
-else
-  echo "https://<spcg-api-route-host>/api/v1/auth/openshift/callback"
 fi
 echo ""
 echo "=== Portal auth/config ==="

@@ -8,20 +8,19 @@ Three namespaces, no `pcap-frontend`, no migration delete patches.
 | `spcg-control` | restricted | `spcg-ui-portal`, `spcg-neo4j` + Route `spcg-api` |
 | `pcap-capture` | privileged | `spcg-backend-engine`, ephemeral sensors |
 
-## Prerequisites (cluster admin, once)
+## Prerequisites
 
-1. **OAuthClient** `spcg-ui` with redirect (after first apply, use real host):
+- **Cluster-admin once** (or RBAC: create `oauthclients`, secrets in `spcg-control`) for OAuth bootstrap — same class of permission as Argo CD Operator SSO.
+- Rotate default Neo4j/graph secrets in `control/secrets.yaml` before production.
 
-   `https://$(oc get route spcg-api -n spcg-control -o jsonpath='{.spec.host}')/api/v1/auth/openshift/callback`
+OAuth **client secret is not typed by the admin**: `openshift-secure-apply.sh` runs `openshift-oauth-bootstrap.sh`, which generates a secret, registers `OAuthClient` `spcg-ui`, and creates `spcg-oauth-client` in `spcg-control` (redirect URI taken from Route `spcg-api`).
 
-2. **Secret** in control namespace:
+Manual bootstrap only if needed:
 
-   ```bash
-   oc create secret generic spcg-oauth-client -n spcg-control \
-     --from-literal=client-secret='<matches OAuthClient>'
-   ```
-
-3. Rotate default secrets in `control/secrets.yaml` before production (Neo4j + graph key).
+```bash
+oc apply -k manifests/openshift-secure
+SPCG_OAUTH_LAYOUT=secure ./scripts/openshift-oauth-bootstrap.sh
+```
 
 ## Apply
 

@@ -311,12 +311,12 @@ Self-contained manifests under **`manifests/openshift-secure/`** (no `pcap-front
 **Greenfield apply (cluster was wiped):**
 
 ```bash
-oc create secret generic spcg-oauth-client -n spcg-control \
-  --from-literal=client-secret='<matches OAuthClient spcg-ui>'
 ./scripts/openshift-secure-apply.sh
 ```
 
-**OAuthClient redirect** (after Routes exist):
+Requires **cluster-admin once** for OAuth bootstrap (Argo CD Operator–style): the script registers `OAuthClient` `spcg-ui` and `spcg-oauth-client` without the admin copying a secret.
+
+**OAuth redirect** (printed by bootstrap; on Route `spcg-api`):
 
 `https://$(oc get route spcg-api -n spcg-control -o jsonpath='{.spec.host}')/api/v1/auth/openshift/callback`
 

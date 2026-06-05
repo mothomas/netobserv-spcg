@@ -30,7 +30,14 @@ oc apply -k manifests/overlays/openshift-small
 
 Images: **quay.io/moby** — portal/frontend `small-20260616+` (amd64; aligns with git `70288bf`).
 
-### 2. OAuthClient (cluster admin) — same idea as Argo CD
+### 2. OAuth (cluster admin) — Argo CD–style bootstrap
+
+Like Argo CD Operator `spec.sso.dex.openShiftOAuth: true`, SPCG can **auto-register** `OAuthClient` + namespace secret (admin does not copy `client-secret`):
+
+```bash
+oc apply -k manifests/overlays/openshift-small
+SPCG_OAUTH_LAYOUT=small ./scripts/openshift-oauth-bootstrap.sh
+```
 
 Redirect URI **must match exactly** (cf. [argo-cd#4221](https://github.com/argoproj/argo-cd/issues/4221)):
 
@@ -39,13 +46,9 @@ UI_HOST=$(oc get route spcg -n pcap-frontend -o jsonpath='https://{.spec.host}')
 echo "${UI_HOST}/api/v1/auth/openshift/callback"
 ```
 
-Apply [oauth-client.yaml](./oauth-client.yaml) after editing host and secret, then:
+**Secure layout:** use `./scripts/openshift-secure-apply.sh` (bootstrap is built in).
 
-```bash
-oc create secret generic spcg-oauth-client -n pcap-frontend \
-  --from-literal=client-secret='<same-as-oauth-client-secret>' \
-  --dry-run=client -o yaml | oc apply -f -
-```
+Manual path: apply [oauth-client.yaml](./oauth-client.yaml) after editing host and secret, then mirror into `spcg-oauth-client` (only if bootstrap cannot run).
 
 ### 3. Portal RBAC + env (from kustomize)
 
