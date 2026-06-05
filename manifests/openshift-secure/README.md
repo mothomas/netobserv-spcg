@@ -27,10 +27,12 @@ The Job (`oauth-bootstrap/`) runs in-cluster and:
 
 **Bootstrap image:** `registry.redhat.io/ubi9/ubi-minimal:9.5` debug container — no `oc`/CLI image; `bootstrap.sh` uses **curl** against the in-cluster Kubernetes API.
 
-If the portal pod is `CreateContainerConfigError` briefly, wait for the Job to finish, then:
+Manifests include a **placeholder** `spcg-oauth-client` secret so the portal can start; the Job replaces it and restarts portal/frontend. If you applied an older revision without the placeholder:
 
 ```bash
-oc rollout restart deployment/spcg-ui-portal -n spcg-control
+oc create secret generic spcg-oauth-client -n spcg-control --from-literal=client-secret=pending-bootstrap-replace-me
+oc delete job spcg-oauth-bootstrap -n spcg-control --ignore-not-found
+oc apply -k manifests/openshift-secure
 ```
 
 ## Helm chart (later)

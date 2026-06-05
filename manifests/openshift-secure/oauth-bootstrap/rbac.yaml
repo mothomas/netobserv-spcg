@@ -47,6 +47,7 @@ rules:
     verbs: ["create", "get", "update", "patch"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
+    resourceNames: ["spcg-ui-portal"]
     verbs: ["get", "patch"]
   - apiGroups: ["route.openshift.io"]
     resources: ["routes"]
@@ -79,6 +80,7 @@ rules:
     verbs: ["get"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
+    resourceNames: ["spcg-frontend"]
     verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

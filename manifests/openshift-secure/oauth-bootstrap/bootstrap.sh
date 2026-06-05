@@ -109,6 +109,14 @@ patch_deploy_env() {
     "application/strategic-merge-patch+json" >/dev/null
 }
 
+rollout_restart() {
+  ns="$1" deploy="$2"
+  stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo boot)"
+  patch="$(printf '{"spec":{"template":{"metadata":{"annotations":{"spcg.io/oauth-bootstrap-restart":"%s"}}}}}' "$stamp")"
+  api_json PATCH "/apis/apps/v1/namespaces/${ns}/deployments/${deploy}" "$patch" \
+    "application/strategic-merge-patch+json" >/dev/null || true
+}
+
 echo "Waiting for Route ${API_ROUTE_NAME} in ${CONTROL_NS}..."
 API_HOST="$(wait_route_host "$CONTROL_NS" "$API_ROUTE_NAME")" || {
   echo "ERROR: Route ${API_ROUTE_NAME} not ready" >&2
@@ -127,6 +135,9 @@ echo "OAuth redirect URI: ${REDIRECT_URI}"
 
 KS="$(k8s_secret_val)"
 OS="$(ocp_secret_val)"
+case "$KS" in
+  ""|pending-bootstrap-replace-me) KS="" ;;
+esac
 
 if [ -n "$KS" ] && [ -n "$OS" ]; then
   if [ "$KS" != "$OS" ]; then
@@ -169,5 +180,8 @@ patch_deploy_env "$LANDING_NS" "spcg-frontend" "frontend" \
   "$(printf '[{"name":"SPCG_PUBLIC_API_BASE","value":"%s"},{"name":"SPCG_DISABLE_API_PROXY","value":"true"}]' "$API_ORIGIN")"
 patch_deploy_env "$CONTROL_NS" "spcg-ui-portal" "ui-portal" \
   "$(printf '[{"name":"CORS_ORIGIN","value":"%s"}]' "$UI_ORIGIN")"
+
+rollout_restart "$CONTROL_NS" "spcg-ui-portal"
+rollout_restart "$LANDING_NS" "spcg-frontend"
 
 echo "OAuth bootstrap complete."
