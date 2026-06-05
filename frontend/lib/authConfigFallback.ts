@@ -21,9 +21,9 @@ export function buildAuthConfigBody(detail?: string, req?: AuthConfigRequestCont
   const publicBase = resolvePublicApiBase(req?.host, req?.proto);
   const body: AuthConfigBody = { methods, ...(publicBase ? { public_api_base: publicBase } : {}) };
   if (methods.includes("openshift")) {
+    // Same-origin authorize (frontend proxies to portal); avoids wrong derived spcg-api host.
     body.openshift = {
       authorize_path: "/api/v1/auth/openshift/authorize",
-      ...(publicBase ? { authorize_url: `${publicBase}/api/v1/auth/openshift/authorize` } : {}),
       ...(detail ? { error: detail } : {}),
     };
   }

@@ -97,7 +97,6 @@ function clientAuthConfigFallback(detail: string): AuthConfigResponse | null {
   if (methods.includes("openshift")) {
     cfg.openshift = {
       authorize_path: "/api/v1/auth/openshift/authorize",
-      ...(base ? { authorize_url: `${base}/api/v1/auth/openshift/authorize` } : {}),
       error: detail,
     };
   }

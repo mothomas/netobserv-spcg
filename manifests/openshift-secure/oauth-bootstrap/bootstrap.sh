@@ -60,7 +60,8 @@ metadata:
   name: ${OAUTH_CLIENT_NAME}
 grantMethod: ${GRANT_METHOD}
 redirectURIs:
-  - ${REDIRECT_URI}
+  - ${API_REDIRECT_URI}
+  - ${UI_REDIRECT_URI}
 secret: "${sec}"
 EOC
 }
@@ -87,10 +88,13 @@ UI_HOST="$(wait_route_host "$LANDING_NS" "$UI_ROUTE_NAME")" || {
   exit 1
 }
 
-REDIRECT_URI="https://${API_HOST}${CALLBACK_PATH}"
+API_REDIRECT_URI="https://${API_HOST}${CALLBACK_PATH}"
+UI_REDIRECT_URI="https://${UI_HOST}${CALLBACK_PATH}"
 UI_ORIGIN="https://${UI_HOST}"
 API_ORIGIN="https://${API_HOST}"
-echo "OAuth redirect URI: ${REDIRECT_URI}"
+echo "OAuth redirect URIs:"
+echo "  API (primary): ${API_REDIRECT_URI}"
+echo "  UI (fallback):  ${UI_REDIRECT_URI}"
 
 KS="$(k8s_secret_val)"
 OS="$(ocp_secret_val)"
@@ -123,17 +127,23 @@ if kubectl_get cm oauth-serving-cert -n openshift-config-managed -o jsonpath='{.
 fi
 
 OAUTH_HOST="$(kubectl_get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' || true)"
+PORTAL_ENV="CORS_ORIGIN=${UI_ORIGIN}"
+PORTAL_ENV="${PORTAL_ENV} SPCG_FRONTEND_URL=${UI_ORIGIN}"
+PORTAL_ENV="${PORTAL_ENV} SPCG_PUBLIC_API_BASE=${API_ORIGIN}"
+PORTAL_ENV="${PORTAL_ENV} OAUTH_REDIRECT_URL=${API_REDIRECT_URI}"
 if [ -n "$OAUTH_HOST" ]; then
   OAUTH_TOKEN_URL="https://${OAUTH_HOST}/oauth/token"
+  OAUTH_AUTHORIZE_URL="https://${OAUTH_HOST}/oauth/authorize"
   NO_PROXY=".cluster.local,.svc,127.0.0.1,localhost,${OAUTH_HOST}"
-  kubectl set env "deployment/spcg-ui-portal" -n "$CONTROL_NS" \
-    "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}" "NO_PROXY=${NO_PROXY}" || true
+  PORTAL_ENV="${PORTAL_ENV} OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}"
+  PORTAL_ENV="${PORTAL_ENV} OAUTH_AUTHORIZE_URL=${OAUTH_AUTHORIZE_URL}"
+  PORTAL_ENV="${PORTAL_ENV} NO_PROXY=${NO_PROXY}"
 fi
+# shellcheck disable=SC2086
+kubectl set env "deployment/spcg-ui-portal" -n "$CONTROL_NS" ${PORTAL_ENV} || true
 
 kubectl set env "deployment/spcg-frontend" -n "$LANDING_NS" \
   "SPCG_PUBLIC_API_BASE=${API_ORIGIN}" "SPCG_DISABLE_API_PROXY=true"
-kubectl set env "deployment/spcg-ui-portal" -n "$CONTROL_NS" \
-  "CORS_ORIGIN=${UI_ORIGIN}"
 
 rollout_restart "spcg-ui-portal" "$CONTROL_NS"
 rollout_restart "spcg-frontend" "$LANDING_NS"
