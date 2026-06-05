@@ -7,17 +7,18 @@ export function serverAuthMethods(): string[] {
 
 export type AuthConfigBody = {
   methods: string[];
+  public_api_base?: string;
   openshift?: { authorize_path: string; authorize_url?: string; error?: string };
 };
 
 export function buildAuthConfigBody(detail?: string): AuthConfigBody | null {
   const methods = serverAuthMethods();
   if (!methods.length) return null;
-  const body: AuthConfigBody = { methods };
+  const publicBase = (process.env.SPCG_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_SPCG_API_BASE || "")
+    .trim()
+    .replace(/\/$/, "");
+  const body: AuthConfigBody = { methods, ...(publicBase ? { public_api_base: publicBase } : {}) };
   if (methods.includes("openshift")) {
-    const publicBase = (process.env.SPCG_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_SPCG_API_BASE || "")
-      .trim()
-      .replace(/\/$/, "");
     body.openshift = {
       authorize_path: "/api/v1/auth/openshift/authorize",
       ...(publicBase ? { authorize_url: `${publicBase}/api/v1/auth/openshift/authorize` } : {}),

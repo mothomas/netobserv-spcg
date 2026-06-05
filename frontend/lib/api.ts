@@ -168,7 +168,16 @@ export function authHeaders(sessionId: string): HeadersInit {
 }
 
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(apiUrl(path), { ...init, credentials: init?.credentials ?? "include" });
+  const url = apiUrl(path);
+  if (typeof window !== "undefined" && url.startsWith("/api/") && !publicApiBase()) {
+    return Promise.reject(
+      new Error(
+        "SPCG_PUBLIC_API_BASE is not set — API calls cannot use spcg-frontend (no egress). " +
+          "Wait for job/spcg-oauth-bootstrap in spcg-control, then reload."
+      )
+    );
+  }
+  return fetch(url, { ...init, credentials: init?.credentials ?? "include" });
 }
 
 function kubeconfigPayload(content: string): string {

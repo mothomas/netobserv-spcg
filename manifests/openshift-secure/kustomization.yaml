@@ -21,6 +21,6 @@ images:
     newTag: small-20260616
   - name: docker.io/mothomas/spcg-frontend
     newName: quay.io/moby/spcg-frontend
-    newTag: small-20260620
+    newTag: small-20260621
 patches:
   - path: patches/tolerations.yaml

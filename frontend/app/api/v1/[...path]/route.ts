@@ -10,14 +10,21 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   const path = ctx.params.path;
   const pathKey = path.join("/");
 
-  if (req.method === "GET" && pathKey === "auth/config") {
-    if (apiProxyDisabled()) {
+  if (apiProxyDisabled()) {
+    if (req.method === "GET" && pathKey === "auth/config") {
       const fb = buildAuthConfigBody("portal proxy disabled; using SPCG_AUTH_METHODS");
       if (fb) {
         return Response.json(fb, { status: 200, headers: { "Content-Type": "application/json" } });
       }
       return Response.json({ methods: [], error: "SPCG_AUTH_METHODS not set" }, { status: 502 });
     }
+    return Response.json(
+      {
+        error:
+          "API proxy disabled on spcg-frontend (no egress). Browser must call Route spcg-api — set SPCG_PUBLIC_API_BASE via job/spcg-oauth-bootstrap.",
+      },
+      { status: 503 }
+    );
   }
 
   const url = targetUrl(req, path);
