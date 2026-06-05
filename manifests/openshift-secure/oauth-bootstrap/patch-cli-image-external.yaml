@@ -1,0 +1,13 @@
+# Optional: use when the cluster has no openshift/cli imagestream (apply with -k overlay or oc apply -f).
+# Requires registry.redhat.io pull secret on nodes or global pull secret.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spcg-oauth-bootstrap
+  namespace: spcg-control
+spec:
+  template:
+    spec:
+      containers:
+        - name: bootstrap
+          image: registry.redhat.io/openshift4/ose-cli-rhel9:latest
