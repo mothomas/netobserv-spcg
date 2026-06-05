@@ -6,13 +6,20 @@ function targetUrl(req: NextRequest, path: string[]): string {
   return `${portalBase()}/api/v1/${suffix}${req.nextUrl.search}`;
 }
 
+function requestContext(req: NextRequest) {
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  const proto = req.headers.get("x-forwarded-proto") || "https";
+  return { host, proto };
+}
+
 async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   const path = ctx.params.path;
   const pathKey = path.join("/");
+  const reqCtx = requestContext(req);
 
   if (apiProxyDisabled()) {
     if (req.method === "GET" && pathKey === "auth/config") {
-      const fb = buildAuthConfigBody("portal proxy disabled; using SPCG_AUTH_METHODS");
+      const fb = buildAuthConfigBody("portal proxy disabled; using SPCG_AUTH_METHODS", reqCtx);
       if (fb) {
         return Response.json(fb, { status: 200, headers: { "Content-Type": "application/json" } });
       }
@@ -49,7 +56,7 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   try {
     const res = await fetch(url, init);
     if (req.method === "GET" && pathKey === "auth/config" && (res.status === 404 || res.status >= 500)) {
-      const fb = buildAuthConfigBody(`portal HTTP ${res.status}`);
+      const fb = buildAuthConfigBody(`portal HTTP ${res.status}`, reqCtx);
       if (fb) return Response.json(fb, { status: 200 });
     }
     const outHeaders = new Headers(res.headers);
@@ -61,7 +68,7 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   } catch (err) {
     if (req.method === "GET" && pathKey === "auth/config") {
       const msg = err instanceof Error ? err.message : String(err);
-      const fb = buildAuthConfigBody(`portal unreachable (${msg})`);
+      const fb = buildAuthConfigBody(`portal unreachable (${msg})`, reqCtx);
       if (fb) return Response.json(fb, { status: 200 });
     }
     const msg = err instanceof Error ? err.message : String(err);

@@ -1,3 +1,7 @@
+import { resolvePublicApiBase } from "./publicApiBase";
+
+export type AuthConfigRequestContext = { host?: string; proto?: string };
+
 /** Server-side auth/config fallback from pod env (no portal egress required). */
 export function serverAuthMethods(): string[] {
   const raw = (process.env.SPCG_AUTH_METHODS || "").trim();
@@ -11,12 +15,10 @@ export type AuthConfigBody = {
   openshift?: { authorize_path: string; authorize_url?: string; error?: string };
 };
 
-export function buildAuthConfigBody(detail?: string): AuthConfigBody | null {
+export function buildAuthConfigBody(detail?: string, req?: AuthConfigRequestContext): AuthConfigBody | null {
   const methods = serverAuthMethods();
   if (!methods.length) return null;
-  const publicBase = (process.env.SPCG_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_SPCG_API_BASE || "")
-    .trim()
-    .replace(/\/$/, "");
+  const publicBase = resolvePublicApiBase(req?.host, req?.proto);
   const body: AuthConfigBody = { methods, ...(publicBase ? { public_api_base: publicBase } : {}) };
   if (methods.includes("openshift")) {
     body.openshift = {

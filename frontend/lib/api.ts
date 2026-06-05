@@ -92,9 +92,9 @@ export function setPublicApiBase(base: string): void {
 function clientAuthConfigFallback(detail: string): AuthConfigResponse | null {
   const methods = runtimeAuthMethods();
   if (!methods.length) return null;
-  const cfg: AuthConfigResponse = { methods };
+  const base = publicApiBase();
+  const cfg: AuthConfigResponse = { methods, ...(base ? { public_api_base: base } : {}) };
   if (methods.includes("openshift")) {
-    const base = publicApiBase();
     cfg.openshift = {
       authorize_path: "/api/v1/auth/openshift/authorize",
       ...(base ? { authorize_url: `${base}/api/v1/auth/openshift/authorize` } : {}),
@@ -172,8 +172,8 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   if (typeof window !== "undefined" && url.startsWith("/api/") && !publicApiBase()) {
     return Promise.reject(
       new Error(
-        "SPCG_PUBLIC_API_BASE is not set — API calls cannot use spcg-frontend (no egress). " +
-          "Wait for job/spcg-oauth-bootstrap in spcg-control, then reload."
+        "Cannot resolve spcg-api URL — open UI on Route spcg (not spcg-api), or run " +
+          "job/spcg-oauth-bootstrap to set SPCG_PUBLIC_API_BASE, then reload."
       )
     );
   }

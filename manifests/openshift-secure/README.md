@@ -51,7 +51,7 @@ Parameterize namespaces and client name via `.Values.oauth.*`.
 
 | Component | Tag |
 |-----------|-----|
-| frontend | `quay.io/moby/spcg-frontend:small-20260621` |
+| frontend | `quay.io/moby/spcg-frontend:small-20260622` |
 | portal | `quay.io/moby/spcg-ui-portal:small-20260616` |
 | engine | `quay.io/moby/spcg-backend-engine:small-20260614` |
 
