@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AIDiagnosticModal } from "@/components/AIDiagnosticModal";
 import { ObservabilityWorkbench } from "@/components/ObservabilityWorkbench";
+import { TraceWorkbench } from "@/components/trace/TraceWorkbench";
 import { S3CapturePanel, type CaptureTierLimits } from "@/components/S3CapturePanel";
 import { AppShell } from "@/components/layout/AppShell";
 import { Sidebar, type AppSection } from "@/components/layout/Sidebar";
@@ -41,6 +42,7 @@ import {
   type S3ExportInfo,
   authHeaders,
 } from "@/lib/api";
+import { fetchTraceGraph, startTrace, syncAppUrl, teardownTrace, type TraceGraph } from "@/lib/trace";
 
 type ChunkEvent = {
   session_id: string;
@@ -77,6 +79,7 @@ export default function Home() {
   const [activeSection, setActiveSection] = useState<AppSection>("workspace");
   const workspaceRef = useRef<HTMLDivElement>(null);
   const flowGraphRef = useRef<HTMLDivElement>(null);
+  const traceRef = useRef<HTMLDivElement>(null);
   const [topology, setTopology] = useState<FlowTopology | null>(null);
   const [sigmaGraph, setSigmaGraph] = useState<SigmaGraph | null>(null);
   const [captureSummary, setCaptureSummary] = useState<CaptureSummary | null>(null);
@@ -89,6 +92,12 @@ export default function Home() {
 
   const [loginError, setLoginError] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const [traceError, setTraceError] = useState<string | null>(null);
+  const [traceBusy, setTraceBusy] = useState(false);
+  const [traceId, setTraceId] = useState<string | null>(null);
+  const [traceGraph, setTraceGraph] = useState<TraceGraph | null>(null);
+  const [traceSigmaGraph, setTraceSigmaGraph] = useState<SigmaGraph | null>(null);
+  const [traceTargetPod, setTraceTargetPod] = useState<PodDetail | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
   const [s3Config, setS3Config] = useState<S3CaptureConfig>({
     enabled: false,
@@ -113,12 +122,14 @@ export default function Home() {
         return;
       }
       setShowAI(false);
-      const target = section === "flow" ? flowGraphRef : workspaceRef;
+      syncAppUrl(section, section === "trace" ? traceId : null);
+      const target =
+        section === "flow" ? flowGraphRef : section === "trace" ? traceRef : workspaceRef;
       requestAnimationFrame(() => {
         target.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     },
-    [sessionId]
+    [sessionId, traceId]
   );
 
   const finishLogin = useCallback(async (auth: LoginResponse) => {
@@ -183,10 +194,18 @@ export default function Home() {
     setCapturePods([]);
     setCaptureError(null);
     setS3Export(null);
+    setTraceId(null);
+    setTraceGraph(null);
+    setTraceSigmaGraph(null);
+    setTraceTargetPod(null);
+    setTraceError(null);
   }, []);
 
   const handleLogout = useCallback(async () => {
     abortRef.current?.abort();
+    if (session?.session_id && traceId) {
+      await teardownTrace(session.session_id, traceId).catch(() => undefined);
+    }
     if (session?.session_id) {
       await logout(session.session_id).catch(() => undefined);
     }
@@ -335,8 +354,72 @@ export default function Home() {
   }, [selectedOwnerList, selectedPodList]);
 
   const hasSelection = captureSelections.length > 0;
+  const traceReady = selectedPodList.length === 1;
 
   const s3Active = s3Config.enabled || !!tierLimits?.s3_offload_required;
+
+  const startPacketTrace = async () => {
+    if (!session || !traceReady) {
+      setTraceError("Select exactly one pod for Packet Trace.");
+      return;
+    }
+    setTraceBusy(true);
+    setTraceError(null);
+    try {
+      const resp = await startTrace(session.session_id, selectedNamespaces, captureSelections);
+      setTraceId(resp.trace_id);
+      setTraceGraph(resp.graph);
+      setTraceSigmaGraph(resp.sigma_graph ?? null);
+      setTraceTargetPod(resp.target_pod);
+      setActiveSection("trace");
+      syncAppUrl("trace", resp.trace_id);
+      requestAnimationFrame(() => {
+        traceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } catch (e) {
+      setTraceError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTraceBusy(false);
+    }
+  };
+
+  const endTraceSession = useCallback(async () => {
+    if (!session?.session_id || !traceId) return;
+    setTraceBusy(true);
+    try {
+      await teardownTrace(session.session_id, traceId);
+    } catch {
+      /* best effort */
+    } finally {
+      setTraceId(null);
+      setTraceGraph(null);
+      setTraceSigmaGraph(null);
+      setTraceTargetPod(null);
+      setTraceBusy(false);
+      setActiveSection("workspace");
+      syncAppUrl("workspace");
+    }
+  }, [session, traceId]);
+
+  useEffect(() => {
+    if (!session?.session_id || !workspaceReady || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const section = params.get("section");
+    const tid = params.get("trace_id")?.trim();
+    if (section === "trace") {
+      setActiveSection("trace");
+      if (tid && tid !== traceId) {
+        fetchTraceGraph(session.session_id, tid)
+          .then((data) => {
+            setTraceId(data.trace_id);
+            setTraceGraph(data.graph);
+            setTraceSigmaGraph(data.sigma_graph);
+            setTraceTargetPod(data.target_pod);
+          })
+          .catch((e) => setTraceError(e instanceof Error ? e.message : String(e)));
+      }
+    }
+  }, [session?.session_id, workspaceReady, traceId]);
 
   const startCapture = async () => {
     if (!hasSelection || !session) return;
@@ -693,33 +776,94 @@ export default function Home() {
     );
   }
 
-  const topbar = (
-    <div className="flex flex-wrap items-center justify-between gap-4">
+  const traceAvailable = workspaceReady && (!!traceId || traceReady);
+  const showSection = activeSection === "trace" || activeSection === "flow" ? activeSection : "workspace";
+
+  const handleNavigate = (section: AppSection) => {
+    if (section === "trace" && !traceId && traceReady) {
+      startPacketTrace().catch(() => undefined);
+      return;
+    }
+    navigateSection(section);
+  };
+
+  const topbar =
+    showSection === "trace" ? (
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs text-siem-muted">
+            Workspace <span className="mx-1 opacity-50">/</span> Packet Trace
+          </p>
+          <h1 className="text-lg font-semibold text-siem-text">Infrastructure path discovery</h1>
+          {traceTargetPod && (
+            <p className="text-xs text-siem-muted font-mono mt-0.5">
+              {traceTargetPod.namespace}/{traceTargetPod.name}
+              {traceTargetPod.pod_ip ? ` · ${traceTargetPod.pod_ip}` : ""}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("workspace")}>
+            Back to workspace
+          </button>
+          {!traceId && (
+            <button
+              type="button"
+              className="siem-btn-primary"
+              disabled={!traceReady || traceBusy}
+              onClick={() => startPacketTrace().catch(() => undefined)}
+            >
+              {traceBusy ? "Starting…" : "Start trace"}
+            </button>
+          )}
+        </div>
+      </div>
+    ) : showSection === "flow" ? (
       <div>
-        <h1 className="text-lg font-semibold text-siem-text">Investigation workspace</h1>
+        <p className="text-xs text-siem-muted">
+          Workspace <span className="mx-1 opacity-50">/</span> Flow graph
+        </p>
+        <h1 className="text-lg font-semibold text-siem-text">Capture observability</h1>
         <p className="text-xs text-siem-muted font-mono mt-0.5">
-          {session?.cluster ? `${session.cluster} · ` : ""}
-          {selectedNamespaces.join(", ")}
+          {sessionId ? `Session ${sessionId.slice(0, 8)}…` : "Start a capture to populate the graph"}
         </p>
       </div>
-      <div className="flex gap-2">
-        {!capturing ? (
+    ) : (
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold text-siem-text">Investigation workspace</h1>
+          <p className="text-xs text-siem-muted font-mono mt-0.5">
+            {session?.cluster ? `${session.cluster} · ` : ""}
+            {selectedNamespaces.join(", ")}
+          </p>
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
           <button
             type="button"
-            className="fluent-capture-start"
-            onClick={startCapture}
-            disabled={captureStartBlocked}
+            className="siem-btn-primary"
+            onClick={() => startPacketTrace().catch(() => undefined)}
+            disabled={!traceReady || traceBusy}
+            title={traceReady ? "Start packet trace for selected pod" : "Select exactly one pod"}
           >
-            Start capture
+            {traceBusy ? "Starting trace…" : "Packet Trace"}
           </button>
-        ) : (
-          <button type="button" className="fluent-capture-stop" onClick={stopCapture}>
-            Stop capture
-          </button>
-        )}
+          {!capturing ? (
+            <button
+              type="button"
+              className="fluent-capture-start"
+              onClick={startCapture}
+              disabled={captureStartBlocked}
+            >
+              Start capture
+            </button>
+          ) : (
+            <button type="button" className="fluent-capture-stop" onClick={stopCapture}>
+              Stop capture
+            </button>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
 
   return (
     <AppShell
@@ -729,17 +873,23 @@ export default function Home() {
           cluster={session?.cluster}
           sessionActive={!!session}
           captureActive={capturing}
+          traceActive={!!traceId}
           active={showAI ? "ai" : activeSection}
           flowAvailable={!!sessionId}
+          traceAvailable={traceAvailable}
           aiAvailable={!!sessionId}
-          onNavigate={navigateSection}
+          onNavigate={handleNavigate}
           onSignOut={() => handleLogout()}
         />
       }
       topbar={topbar}
     >
-      <div className="space-y-6 max-w-[1400px]">
+      <div className="space-y-6 max-w-[1600px]">
+      {traceError && (
+        <p className="text-sm text-siem-err whitespace-pre-wrap siem-card px-4 py-3">{traceError}</p>
+      )}
 
+      {showSection === "workspace" && (
       <div ref={workspaceRef} className="space-y-6">
       {session && (
         <S3CapturePanel
@@ -847,8 +997,9 @@ export default function Home() {
       )}
 
       </div>
+      )}
 
-      {sessionId && (
+      {showSection === "flow" && sessionId && (
         <div ref={flowGraphRef} className="scroll-mt-6">
           <ObservabilityWorkbench
             topology={topology}
@@ -869,6 +1020,52 @@ export default function Home() {
           />
         </div>
       )}
+
+      {showSection === "flow" && !sessionId && (
+        <div className="siem-card p-8 text-center text-siem-muted text-sm">
+          Start a capture from the workspace to open the flow graph.
+          <div className="mt-4">
+            <button type="button" className="siem-btn-primary" onClick={() => navigateSection("workspace")}>
+              Go to workspace
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showSection === "trace" && (
+        <div ref={traceRef} className="scroll-mt-6">
+          {traceId && traceGraph && traceTargetPod && session ? (
+            <TraceWorkbench
+              authSessionId={session.session_id}
+              traceId={traceId}
+              targetPod={traceTargetPod}
+              graph={traceGraph}
+              sigmaGraph={traceSigmaGraph}
+              onEnd={() => endTraceSession()}
+              embedded
+            />
+          ) : (
+            <div className="siem-card p-8 max-w-lg mx-auto text-center">
+              <h2 className="text-base font-semibold text-siem-text mb-2">Packet Trace</h2>
+              <p className="text-sm text-siem-muted mb-4">
+                Select exactly one pod in the workspace, then start a trace to map ingress, egress, and host paths.
+              </p>
+              <button
+                type="button"
+                className="siem-btn-primary mr-2"
+                disabled={!traceReady || traceBusy}
+                onClick={() => startPacketTrace().catch(() => undefined)}
+              >
+                {traceBusy ? "Starting…" : "Start trace"}
+              </button>
+              <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("workspace")}>
+                Select pod
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
 
       {showAI && sessionId && session && (
         <AIDiagnosticModal

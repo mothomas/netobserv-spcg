@@ -77,10 +77,16 @@ func (s *Server) handleOpenShiftAuthorize(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+	redirectURI := cfg.RedirectURL
 	if u := auth.CallbackRedirectURLFromRequest(r); u != "" {
+		redirectURI = u
 		cfg.RedirectURL = u
 	}
-	state, err := auth.OAuthState.Issue()
+	if strings.TrimSpace(redirectURI) == "" {
+		http.Error(w, "could not determine OAuth redirect_uri", http.StatusServiceUnavailable)
+		return
+	}
+	state, err := auth.OAuthState.IssueRedirect(redirectURI)
 	if err != nil {
 		http.Error(w, "failed to start oauth", http.StatusInternalServerError)
 		return
@@ -111,9 +117,6 @@ func (s *Server) handleOpenShiftCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	if u := auth.CallbackRedirectURLFromRequest(r); u != "" {
-		cfg.RedirectURL = u
-	}
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
 		desc := r.URL.Query().Get("error_description")
 		msg := fmt.Sprintf("oauth error: %s %s", errParam, desc)
@@ -130,8 +133,14 @@ func (s *Server) handleOpenShiftCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "missing code or state", http.StatusBadRequest)
 		return
 	}
-	if !auth.OAuthState.Consume(state) {
+	redirectURI, okState := auth.OAuthState.ConsumeRedirect(state)
+	if !okState {
 		http.Error(w, "invalid or expired oauth state", http.StatusBadRequest)
+		return
+	}
+	cfg.RedirectURL = redirectURI
+	if sec := strings.TrimSpace(cfg.ClientSecret); sec == "" || sec == "pending-bootstrap-replace-me" {
+		http.Error(w, "OAUTH_CLIENT_SECRET not configured — run job/spcg-oauth-bootstrap or scripts/openshift-secure-fix-oauth.sh", http.StatusServiceUnavailable)
 		return
 	}
 	accessToken, err := auth.ExchangeCodeForToken(auth.OAuthHTTPClient(), cfg, code)

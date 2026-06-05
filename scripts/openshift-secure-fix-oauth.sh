@@ -53,6 +53,15 @@ oc create secret generic "$SECRET_NAME" -n "$CONTROL_NS" \
   --from-literal=client-secret="${SECRET}" \
   --dry-run=client -o yaml | oc apply -f -
 
+K8S_SECRET="$(oc get secret "$SECRET_NAME" -n "$CONTROL_NS" -o jsonpath='{.data.client-secret}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+OC_SECRET="$(oc get oauthclient "$CLIENT_ID" -o jsonpath='{.secret}' 2>/dev/null || true)"
+if [ -n "$K8S_SECRET" ] && [ -n "$OC_SECRET" ] && [ "$K8S_SECRET" != "$OC_SECRET" ]; then
+  echo "WARN: syncing ${SECRET_NAME} from OAuthClient (was out of sync)" >&2
+  oc create secret generic "$SECRET_NAME" -n "$CONTROL_NS" \
+    --from-literal=client-secret="${OC_SECRET}" \
+    --dry-run=client -o yaml | oc apply -f -
+fi
+
 OAUTH_HOST="$(oc get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' 2>/dev/null || true)"
 PORTAL_ENV=(
   "SPCG_AUTH_METHODS=openshift,kubeconfig"

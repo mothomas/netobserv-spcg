@@ -62,6 +62,7 @@ func (s *Server) Routes() http.Handler {
 	s.registerAIRoutes(mux)
 	s.registerGraphRoutes(mux)
 	s.registerObservabilityRoutes(mux)
+	s.registerTraceRoutes(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -205,6 +206,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	sid := strings.TrimSpace(r.Header.Get(auth.HeaderSPCGSession))
 	if sid != "" {
 		purgeCaptureSessions(sid)
+		purgeTraceSessions(sid)
 		s.Sessions.Delete(sid)
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -1,12 +1,14 @@
-export type AppSection = "workspace" | "flow" | "ai";
+export type AppSection = "workspace" | "flow" | "trace" | "ai";
 
 type Props = {
   product: string;
   cluster?: string;
   sessionActive?: boolean;
   captureActive?: boolean;
+  traceActive?: boolean;
   active?: AppSection;
   flowAvailable?: boolean;
+  traceAvailable?: boolean;
   aiAvailable?: boolean;
   onNavigate?: (section: AppSection) => void;
   onSignOut?: () => void;
@@ -17,8 +19,10 @@ export function Sidebar({
   cluster,
   sessionActive,
   captureActive,
+  traceActive,
   active = "workspace",
   flowAvailable,
+  traceAvailable,
   aiAvailable,
   onNavigate,
   onSignOut,
@@ -45,6 +49,14 @@ export function Sidebar({
           hint={captureActive ? "Live" : "Idle"}
           hintTone={captureActive ? "ok" : "muted"}
           disabled
+        />
+        <NavItem
+          label="Packet Trace"
+          active={active === "trace"}
+          hint={traceActive ? "Live" : traceAvailable ? "Ready" : "Select pod"}
+          hintTone={traceActive ? "ok" : "muted"}
+          disabled={!traceAvailable}
+          onClick={() => traceAvailable && onNavigate?.("trace")}
         />
         <NavItem
           label="Flow graph"
