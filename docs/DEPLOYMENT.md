@@ -205,7 +205,7 @@ OpenShift uses the same **base workloads** as vanilla Kubernetes (including **Ne
 | Tier | Command |
 |------|---------|
 | **Small** (default) | `oc apply -k manifests/overlays/openshift-small` |
-| **Secure** (3-namespace greenfield) | `oc apply -k manifests/openshift-secure` or `./scripts/openshift-secure-apply.sh` |
+| **Secure** (3-namespace greenfield) | `oc apply -k manifests/openshift-secure` then wait for Job `spcg-oauth-bootstrap` |
 | **Medium** | `oc apply -k manifests/overlays/openshift-medium` |
 | **Peak** | `oc apply -k manifests/overlays/openshift-peak` |
 | Base only (same as small) | `oc apply -k manifests/openshift/` |
@@ -311,10 +311,11 @@ Self-contained manifests under **`manifests/openshift-secure/`** (no `pcap-front
 **Greenfield apply (cluster was wiped):**
 
 ```bash
-./scripts/openshift-secure-apply.sh
+oc apply -k manifests/openshift-secure
+oc wait --for=condition=complete job/spcg-oauth-bootstrap -n spcg-control --timeout=15m
 ```
 
-Requires **cluster-admin once** for OAuth bootstrap (Argo CD Operator–style): the script registers `OAuthClient` `spcg-ui` and `spcg-oauth-client` without the admin copying a secret.
+A **post-install Job** (`manifests/openshift-secure/oauth-bootstrap/`) registers `OAuthClient` `spcg-ui` and `spcg-oauth-client` in-cluster (Helm-hook annotations included). Requires RBAC to create `oauthclients` (platform install).
 
 **OAuth redirect** (printed by bootstrap; on Route `spcg-api`):
 

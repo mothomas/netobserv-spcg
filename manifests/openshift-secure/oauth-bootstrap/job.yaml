@@ -1,0 +1,62 @@
+# Post-install hook: registers OAuthClient + spcg-oauth-client, sets Route-derived env.
+# Helm: same metadata.annotations (hook-weight, hook-delete-policy).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spcg-oauth-bootstrap
+  namespace: spcg-control
+  labels:
+    app.kubernetes.io/component: oauth-bootstrap
+    app.kubernetes.io/part-of: spcg
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 8
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: oauth-bootstrap
+    spec:
+      serviceAccountName: spcg-oauth-bootstrap
+      restartPolicy: OnFailure
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: registry.k8s.io/kubectl:v1.31.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/bootstrap.sh"]
+          env:
+            - name: LANDING_NS
+              value: spcg-landing
+            - name: CONTROL_NS
+              value: spcg-control
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 1000
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: scripts
+          configMap:
+            name: spcg-oauth-bootstrap
+            defaultMode: 0555

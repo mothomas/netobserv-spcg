@@ -11,6 +11,7 @@ resources:
   - capture/network-policies.yaml
   - routes.yaml
   - rbac-oauth.yaml
+  - oauth-bootstrap
 images:
   - name: docker.io/mothomas/spcg-backend-engine
     newName: quay.io/moby/spcg-backend-engine

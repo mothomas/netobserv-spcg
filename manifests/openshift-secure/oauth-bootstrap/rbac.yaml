@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spcg-oauth-bootstrap
+  namespace: spcg-control
+  labels:
+    app.kubernetes.io/component: oauth-bootstrap
+    app.kubernetes.io/part-of: spcg
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spcg-oauth-bootstrap
+  labels:
+    app.kubernetes.io/component: oauth-bootstrap
+    app.kubernetes.io/part-of: spcg
+rules:
+  - apiGroups: ["oauth.openshift.io"]
+    resources: ["oauthclients"]
+    resourceNames: ["spcg-ui"]
+    verbs: ["create", "get", "update", "patch"]
+  - apiGroups: ["oauth.openshift.io"]
+    resources: ["oauthclients"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spcg-oauth-bootstrap
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spcg-oauth-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: spcg-oauth-bootstrap
+    namespace: spcg-control
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spcg-oauth-bootstrap
+  namespace: spcg-control
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["create", "get", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    resourceNames: ["spcg-api"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spcg-oauth-bootstrap
+  namespace: spcg-control
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spcg-oauth-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: spcg-oauth-bootstrap
+    namespace: spcg-control
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spcg-oauth-bootstrap
+  namespace: spcg-landing
+rules:
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    resourceNames: ["spcg"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spcg-oauth-bootstrap
+  namespace: spcg-landing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spcg-oauth-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: spcg-oauth-bootstrap
+    namespace: spcg-control
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spcg-oauth-bootstrap-oauth-route
+  namespace: openshift-authentication
+rules:
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    resourceNames: ["oauth-openshift"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spcg-oauth-bootstrap-oauth-route
+  namespace: openshift-authentication
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spcg-oauth-bootstrap-oauth-route
+subjects:
+  - kind: ServiceAccount
+    name: spcg-oauth-bootstrap
+    namespace: spcg-control
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spcg-oauth-bootstrap-oauth-ca
+  namespace: openshift-config-managed
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["oauth-serving-cert"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spcg-oauth-bootstrap-oauth-ca
+  namespace: openshift-config-managed
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spcg-oauth-bootstrap-oauth-ca
+subjects:
+  - kind: ServiceAccount
+    name: spcg-oauth-bootstrap
+    namespace: spcg-control

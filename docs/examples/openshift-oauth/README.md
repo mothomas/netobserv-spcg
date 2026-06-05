@@ -32,12 +32,9 @@ Images: **quay.io/moby** — portal/frontend `small-20260616+` (amd64; aligns wi
 
 ### 2. OAuth (cluster admin) — Argo CD–style bootstrap
 
-Like Argo CD Operator `spec.sso.dex.openShiftOAuth: true`, SPCG can **auto-register** `OAuthClient` + namespace secret (admin does not copy `client-secret`):
+**Secure layout:** Job `spcg-oauth-bootstrap` in `manifests/openshift-secure/oauth-bootstrap/` auto-registers `OAuthClient` + `spcg-oauth-client` (Helm `post-install` hook–ready).
 
-```bash
-oc apply -k manifests/overlays/openshift-small
-SPCG_OAUTH_LAYOUT=small ./scripts/openshift-oauth-bootstrap.sh
-```
+**Small layout:** reuse that Job pattern in a future chart; until then apply [oauth-client.yaml](./oauth-client.yaml) manually or copy the Job into your namespace.
 
 Redirect URI **must match exactly** (cf. [argo-cd#4221](https://github.com/argoproj/argo-cd/issues/4221)):
 

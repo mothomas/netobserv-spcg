@@ -58,7 +58,7 @@ Future gateway-only K8s API access is described in [SECURE-ARCHITECTURE-PLAN.md]
 
 ## Secure layout (`openshift-secure`)
 
-Greenfield apply: **`oc apply -k manifests/openshift-secure`** (see [manifests/openshift-secure/README.md](../manifests/openshift-secure/README.md)). No `pcap-frontend` namespace is created.
+Greenfield apply: **`oc apply -k manifests/openshift-secure`**, then wait for Job **`spcg-oauth-bootstrap`** (see [manifests/openshift-secure/README.md](../manifests/openshift-secure/README.md)). No `pcap-frontend` namespace is created.
 
 ### Namespace split (Pod Security)
 
