@@ -9,3 +9,14 @@ configMapGenerator:
       - bootstrap.sh
     options:
       disableNameSuffixHash: true
+      labels:
+        app.kubernetes.io/component: oauth-bootstrap
+        app.kubernetes.io/part-of: spcg
+patches:
+  - target:
+      kind: ConfigMap
+      name: spcg-oauth-bootstrap
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: spcg-control
