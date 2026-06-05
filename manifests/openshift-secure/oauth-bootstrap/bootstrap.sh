@@ -71,7 +71,7 @@ ocp_secret_val() {
 
 apply_oauthclient() {
   sec="$1"
-  cat <<EOC | kubectl apply -f -
+  if ! cat <<EOC | kubectl apply -f -
 apiVersion: oauth.openshift.io/v1
 kind: OAuthClient
 metadata:
@@ -84,6 +84,10 @@ redirectURIs:
   - https://${UI_HOST}/
 secret: "${sec}"
 EOC
+  then
+    echo "ERROR: failed to apply OAuthClient ${OAUTH_CLIENT_NAME} (cluster-admin required)" >&2
+    return 1
+  fi
 }
 
 apply_k8s_secret() {
@@ -134,18 +138,24 @@ if [ -n "$KS" ] && [ -n "$OS" ]; then
     echo "WARN: syncing ${SECRET_NAME} from OAuthClient" >&2
     apply_k8s_secret "$OS"
   fi
-  apply_oauthclient "$OS"
+  apply_oauthclient "$OS" || exit 1
 elif [ -n "$OS" ]; then
   apply_k8s_secret "$OS"
-  apply_oauthclient "$OS"
+  apply_oauthclient "$OS" || exit 1
 elif [ -n "$KS" ]; then
-  apply_oauthclient "$KS"
+  apply_oauthclient "$KS" || exit 1
 else
   NEW="$(random_secret)"
   echo "Creating OAuthClient ${OAUTH_CLIENT_NAME} and secret ${SECRET_NAME} (value not logged)."
-  apply_oauthclient "$NEW"
+  apply_oauthclient "$NEW" || exit 1
   apply_k8s_secret "$NEW"
 fi
+
+if ! kubectl_get oauthclient "$OAUTH_CLIENT_NAME" -o name | grep -q .; then
+  echo "ERROR: OAuthClient ${OAUTH_CLIENT_NAME} missing after bootstrap" >&2
+  exit 1
+fi
+echo "OAuthClient ${OAUTH_CLIENT_NAME} registered."
 
 if kubectl_get cm oauth-serving-cert -n openshift-config-managed -o jsonpath='{.data.ca-bundle\.crt}' | grep -q BEGIN; then
   kubectl create configmap spcg-oauth-serving-ca -n "$CONTROL_NS" \

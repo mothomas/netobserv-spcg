@@ -113,7 +113,10 @@ func AuthorizeRedirectURL(cfg OAuthSettings, state string) (string, error) {
 	q.Set("client_id", cfg.ClientID)
 	q.Set("response_type", "code")
 	q.Set("redirect_uri", cfg.RedirectURL)
-	q.Set("scope", cfg.Scope)
+	// Omit scope unless set — OpenShift returns invalid_request when scope violates OAuthClient scopeRestrictions.
+	if strings.TrimSpace(cfg.Scope) != "" {
+		q.Set("scope", cfg.Scope)
+	}
 	q.Set("state", state)
 	u.RawQuery = q.Encode()
 	return u.String(), nil

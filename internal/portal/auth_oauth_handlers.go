@@ -43,9 +43,12 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		uiBase := strings.TrimSuffix(cfg.FrontendURL, "/")
 		apiBase := strings.TrimSuffix(cfg.PublicAPIBase, "/")
-		if cfg.RedirectURL != "" {
+		if u := auth.CallbackRedirectURLFromRequest(r); u != "" {
+			osCfg["redirect_uri"] = u
+		} else if cfg.RedirectURL != "" {
 			osCfg["redirect_uri"] = cfg.RedirectURL
 		}
+		osCfg["client_id"] = cfg.ClientID
 		if apiBase != "" && apiBase != uiBase {
 			out["public_api_base"] = apiBase
 			osCfg["authorize_url"] = apiBase + "/api/v1/auth/openshift/authorize"
@@ -116,7 +119,12 @@ func (s *Server) handleOpenShiftCallback(w http.ResponseWriter, r *http.Request)
 	}
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
 		desc := r.URL.Query().Get("error_description")
-		http.Error(w, fmt.Sprintf("oauth error: %s %s", errParam, desc), http.StatusUnauthorized)
+		msg := fmt.Sprintf("oauth error: %s %s", errParam, desc)
+		if errParam == "invalid_request" {
+			msg += fmt.Sprintf(" — verify OAuthClient %q includes redirect_uri %q (oc get oauthclient %s -o yaml)",
+				cfg.ClientID, cfg.RedirectURL, cfg.ClientID)
+		}
+		http.Error(w, msg, http.StatusUnauthorized)
 		return
 	}
 	state := strings.TrimSpace(r.URL.Query().Get("state"))

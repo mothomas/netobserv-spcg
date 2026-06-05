@@ -118,10 +118,8 @@ func ResolveOAuthSettings(ctx context.Context) (OAuthSettings, bool, error) {
 	if clientID == "" {
 		clientID = "spcg-ui"
 	}
+	// Only send scope on /oauth/authorize when OAUTH_SCOPE is set (see AuthorizeRedirectURL).
 	scope := strings.TrimSpace(os.Getenv("OAUTH_SCOPE"))
-	if scope == "" {
-		scope = "user:full"
-	}
 	cfg := OAuthSettings{
 		AuthorizeURL: strings.TrimSpace(os.Getenv("OAUTH_AUTHORIZE_URL")),
 		TokenURL:     strings.TrimSpace(os.Getenv("OAUTH_TOKEN_URL")),
@@ -171,7 +169,10 @@ func IngressBaseURL(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	host := strings.TrimSpace(r.Header.Get("X-SPCG-Public-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	}
 	if host == "" {
 		host = r.Host
 	}
@@ -186,7 +187,7 @@ func IngressBaseURL(r *http.Request) string {
 	if r.TLS == nil {
 		if p := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); p != "" {
 			proto = p
-		} else {
+		} else if !strings.Contains(host, ".apps.") {
 			proto = "http"
 		}
 	}
