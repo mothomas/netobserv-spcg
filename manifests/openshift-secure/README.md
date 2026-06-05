@@ -25,7 +25,7 @@ The Job (`oauth-bootstrap/`) runs in-cluster and:
 
 **RBAC:** Job SA needs cluster permission to manage `oauthclients` (same class as Argo CD Operator SSO). Platform team applies the manifest once.
 
-**CLI image:** Job uses in-cluster `image-registry.openshift-image-registry.svc:5000/openshift/cli:latest` (no `registry.redhat.io` pull secret). Verify: `oc get is cli -n openshift`. External registry fallback: `oauth-bootstrap/patch-cli-image-external.yaml`.
+**Bootstrap image:** `registry.redhat.io/ubi9/ubi-minimal:9.5` debug container — no `oc`/CLI image; `bootstrap.sh` uses **curl** against the in-cluster Kubernetes API.
 
 If the portal pod is `CreateContainerConfigError` briefly, wait for the Job to finish, then:
 

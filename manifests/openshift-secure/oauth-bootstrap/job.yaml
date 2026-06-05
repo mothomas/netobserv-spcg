@@ -29,9 +29,9 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: bootstrap
-          # In-cluster OpenShift CLI (no registry.redhat.io pull secret). Override for Helm/air-gap via .Values.oauth.bootstrapImage.
-          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+        - name: debug
+          # Minimal debug shell (same family as portal neo4j wait init). API calls via curl in bootstrap.sh.
+          image: registry.redhat.io/ubi9/ubi-minimal:9.5
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/scripts/bootstrap.sh"]
           env:
@@ -44,7 +44,6 @@ spec:
             capabilities:
               drop: ["ALL"]
             runAsNonRoot: true
-            # Do not pin runAsUser — must stay within namespace SCC UID range (restricted-v2).
           volumeMounts:
             - name: scripts
               mountPath: /scripts

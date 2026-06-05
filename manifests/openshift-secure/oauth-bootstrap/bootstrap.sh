@@ -1,9 +1,7 @@
 #!/bin/sh
+# Minimal debug image (ubi-minimal): no oc/kubectl — in-cluster API via curl only.
 set -eu
-# ose-cli image provides oc; plain kubectl image provides kubectl.
-if command -v oc >/dev/null 2>&1; then
-  kubectl() { oc "$@"; }
-fi
+
 OAUTH_CLIENT_NAME="${OAUTH_CLIENT_NAME:-spcg-ui}"
 SECRET_NAME="${SECRET_NAME:-spcg-oauth-client}"
 SECRET_KEY="${SECRET_KEY:-client-secret}"
@@ -15,12 +13,43 @@ UI_ROUTE_NAME="${UI_ROUTE_NAME:-spcg}"
 CALLBACK_PATH="${CALLBACK_PATH:-/api/v1/auth/openshift/callback}"
 ROUTE_WAIT_SECS="${ROUTE_WAIT_SECS:-300}"
 
-kubectl_get() { kubectl get "$@" 2>/dev/null || true; }
+API_SERVER="${KUBERNETES_SERVICE_HOST:-kubernetes.default.svc}"
+API_PORT="${KUBERNETES_SERVICE_PORT:-443}"
+API_BASE="https://${API_SERVER}:${API_PORT}"
+TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+CACERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
+http_code() {
+  curl -sS -o /dev/null -w "%{http_code}" --cacert "$CACERT" \
+    -H "Authorization: Bearer ${TOKEN}" "$@"
+}
+
+api_get() {
+  curl -sfS --cacert "$CACERT" -H "Authorization: Bearer ${TOKEN}" \
+    -H "Accept: application/json" "${API_BASE}$1" 2>/dev/null || true
+}
+
+api_json() {
+  method="$1"
+  path="$2"
+  body="$3"
+  ctype="${4:-application/json}"
+  curl -sfS --cacert "$CACERT" -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: ${ctype}" -X "$method" -d "$body" "${API_BASE}${path}"
+}
+
+json_field() {
+  printf '%s' "$1" | sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -1
+}
+
+b64dec() {
+  printf '%s' "$1" | base64 -d 2>/dev/null || true
+}
 
 wait_route_host() {
   ns="$1" name="$2" i=0
   while [ "$i" -lt "$ROUTE_WAIT_SECS" ]; do
-    host="$(kubectl_get route "$name" -n "$ns" -o jsonpath='{.spec.host}')"
+    host="$(json_field "$(api_get "/apis/route.openshift.io/v1/namespaces/${ns}/routes/${name}")" host)"
     if [ -n "$host" ]; then
       printf '%s' "$host"
       return 0
@@ -31,14 +60,63 @@ wait_route_host() {
   return 1
 }
 
+random_secret() {
+  head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
+k8s_secret_val() {
+  body="$(api_get "/api/v1/namespaces/${CONTROL_NS}/secrets/${SECRET_NAME}")"
+  b64="$(printf '%s' "$body" | sed -n 's/.*"client-secret":"\([^"]*\)".*/\1/p' | head -1)"
+  b64dec "$b64"
+}
+
+ocp_secret_val() {
+  json_field "$(api_get "/apis/oauth.openshift.io/v1/oauthclients/${OAUTH_CLIENT_NAME}")" secret
+}
+
+apply_oauthclient() {
+  sec="$1"
+  body="$(printf '{"apiVersion":"oauth.openshift.io/v1","kind":"OAuthClient","metadata":{"name":"%s"},"grantMethod":"%s","redirectURIs":["%s"],"secret":"%s"}' \
+    "$OAUTH_CLIENT_NAME" "$GRANT_METHOD" "$REDIRECT_URI" "$sec")"
+  code="$(http_code -X PUT -H "Content-Type: application/json" -d "$body" \
+    "${API_BASE}/apis/oauth.openshift.io/v1/oauthclients/${OAUTH_CLIENT_NAME}")"
+  if [ "$code" = "404" ]; then
+    api_json POST "/apis/oauth.openshift.io/v1/oauthclients" "$body"
+  elif [ "$code" != "200" ] && [ "$code" != "201" ]; then
+    echo "ERROR: OAuthClient apply HTTP ${code}" >&2
+    exit 1
+  fi
+}
+
+apply_k8s_secret() {
+  sec="$1"
+  body="$(printf '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"%s","namespace":"%s"},"type":"Opaque","stringData":{"%s":"%s"}}' \
+    "$SECRET_NAME" "$CONTROL_NS" "$SECRET_KEY" "$sec")"
+  code="$(http_code -X PUT -H "Content-Type: application/json" -d "$body" \
+    "${API_BASE}/api/v1/namespaces/${CONTROL_NS}/secrets/${SECRET_NAME}")"
+  if [ "$code" = "404" ]; then
+    api_json POST "/api/v1/namespaces/${CONTROL_NS}/secrets" "$body"
+  elif [ "$code" != "200" ] && [ "$code" != "201" ]; then
+    echo "ERROR: Secret apply HTTP ${code}" >&2
+    exit 1
+  fi
+}
+
+patch_deploy_env() {
+  ns="$1" deploy="$2" container="$3" json_env="$4"
+  patch="$(printf '{"spec":{"template":{"spec":{"containers":[{"name":"%s","env":%s}]}}}}' "$container" "$json_env")"
+  api_json PATCH "/apis/apps/v1/namespaces/${ns}/deployments/${deploy}" "$patch" \
+    "application/strategic-merge-patch+json" >/dev/null
+}
+
 echo "Waiting for Route ${API_ROUTE_NAME} in ${CONTROL_NS}..."
 API_HOST="$(wait_route_host "$CONTROL_NS" "$API_ROUTE_NAME")" || {
-  echo "ERROR: Route ${API_ROUTE_NAME} not ready in ${CONTROL_NS}" >&2
+  echo "ERROR: Route ${API_ROUTE_NAME} not ready" >&2
   exit 1
 }
 echo "Waiting for Route ${UI_ROUTE_NAME} in ${LANDING_NS}..."
 UI_HOST="$(wait_route_host "$LANDING_NS" "$UI_ROUTE_NAME")" || {
-  echo "ERROR: Route ${UI_ROUTE_NAME} not ready in ${LANDING_NS}" >&2
+  echo "ERROR: Route ${UI_ROUTE_NAME} not ready" >&2
   exit 1
 }
 
@@ -47,45 +125,8 @@ UI_ORIGIN="https://${UI_HOST}"
 API_ORIGIN="https://${API_HOST}"
 echo "OAuth redirect URI: ${REDIRECT_URI}"
 
-random_secret() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 16
-  else
-    head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
-  fi
-}
-
-k8s_secret() {
-  kubectl_get secret "$SECRET_NAME" -n "$CONTROL_NS" -o "jsonpath={.data.${SECRET_KEY}}" | base64 -d 2>/dev/null || true
-}
-
-ocp_secret() {
-  kubectl_get oauthclient "$OAUTH_CLIENT_NAME" -o jsonpath='{.secret}' || true
-}
-
-apply_oauthclient() {
-  sec="$1"
-  cat <<EOC | kubectl apply -f -
-apiVersion: oauth.openshift.io/v1
-kind: OAuthClient
-metadata:
-  name: ${OAUTH_CLIENT_NAME}
-grantMethod: ${GRANT_METHOD}
-redirectURIs:
-  - ${REDIRECT_URI}
-secret: "${sec}"
-EOC
-}
-
-apply_k8s_secret() {
-  sec="$1"
-  kubectl create secret generic "$SECRET_NAME" -n "$CONTROL_NS" \
-    --from-literal="${SECRET_KEY}=${sec}" \
-    --dry-run=client -o yaml | kubectl apply -f -
-}
-
-KS="$(k8s_secret)"
-OS="$(ocp_secret)"
+KS="$(k8s_secret_val)"
+OS="$(ocp_secret_val)"
 
 if [ -n "$KS" ] && [ -n "$OS" ]; then
   if [ "$KS" != "$OS" ]; then
@@ -105,23 +146,28 @@ else
   apply_k8s_secret "$NEW"
 fi
 
-if kubectl_get cm oauth-serving-cert -n openshift-config-managed -o jsonpath='{.data.ca-bundle\.crt}' | grep -q BEGIN; then
-  kubectl create configmap spcg-oauth-serving-ca -n "$CONTROL_NS" \
-    --from-literal=ca-bundle.crt="$(kubectl_get cm oauth-serving-cert -n openshift-config-managed -o jsonpath='{.data.ca-bundle\.crt}')" \
-    --dry-run=client -o yaml | kubectl apply -f -
+ca_json="$(api_get "/api/v1/namespaces/openshift-config-managed/configmaps/oauth-serving-cert")"
+ca_b64="$(printf '%s' "$ca_json" | sed -n 's/.*"ca-bundle.crt":"\([^"]*\)".*/\1/p' | head -1)"
+if [ -n "$ca_b64" ]; then
+  cm_body="$(printf '{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"spcg-oauth-serving-ca","namespace":"%s"},"data":{"ca-bundle.crt":"%s"}}' \
+    "$CONTROL_NS" "$ca_b64")"
+  code="$(http_code -X PUT -H "Content-Type: application/json" -d "$cm_body" \
+    "${API_BASE}/api/v1/namespaces/${CONTROL_NS}/configmaps/spcg-oauth-serving-ca")"
+  if [ "$code" = "404" ]; then
+    api_json POST "/api/v1/namespaces/${CONTROL_NS}/configmaps" "$cm_body" >/dev/null || true
+  fi
 fi
 
-OAUTH_HOST="$(kubectl_get route oauth-openshift -n openshift-authentication -o jsonpath='{.spec.host}' || true)"
+OAUTH_HOST="$(json_field "$(api_get "/apis/route.openshift.io/v1/namespaces/openshift-authentication/routes/oauth-openshift")" host)"
 if [ -n "$OAUTH_HOST" ]; then
-  OAUTH_TOKEN_URL="https://${OAUTH_HOST}/oauth/token"
-  NO_PROXY=".cluster.local,.svc,127.0.0.1,localhost,${OAUTH_HOST}"
-  kubectl set env "deployment/spcg-ui-portal" -n "$CONTROL_NS" \
-    "OAUTH_TOKEN_URL=${OAUTH_TOKEN_URL}" "NO_PROXY=${NO_PROXY}" || true
+  patch_deploy_env "$CONTROL_NS" "spcg-ui-portal" "ui-portal" \
+    "$(printf '[{"name":"OAUTH_TOKEN_URL","value":"https://%s/oauth/token"},{"name":"NO_PROXY","value":".cluster.local,.svc,127.0.0.1,localhost,%s"}]' \
+      "$OAUTH_HOST" "$OAUTH_HOST")"
 fi
 
-kubectl set env "deployment/spcg-frontend" -n "$LANDING_NS" \
-  "SPCG_PUBLIC_API_BASE=${API_ORIGIN}" "SPCG_DISABLE_API_PROXY=true"
-kubectl set env "deployment/spcg-ui-portal" -n "$CONTROL_NS" \
-  "CORS_ORIGIN=${UI_ORIGIN}"
+patch_deploy_env "$LANDING_NS" "spcg-frontend" "frontend" \
+  "$(printf '[{"name":"SPCG_PUBLIC_API_BASE","value":"%s"},{"name":"SPCG_DISABLE_API_PROXY","value":"true"}]' "$API_ORIGIN")"
+patch_deploy_env "$CONTROL_NS" "spcg-ui-portal" "ui-portal" \
+  "$(printf '[{"name":"CORS_ORIGIN","value":"%s"}]' "$UI_ORIGIN")"
 
 echo "OAuth bootstrap complete."
