@@ -1,16 +1,26 @@
 import { NextRequest } from "next/server";
-
-function backendBase(): string {
-  return (process.env.SPCG_API_URL || "http://localhost:8080").replace(/\/$/, "");
-}
+import { apiProxyDisabled, buildAuthConfigBody, portalBase } from "@/lib/authConfigFallback";
 
 function targetUrl(req: NextRequest, path: string[]): string {
   const suffix = path.join("/");
-  return `${backendBase()}/api/v1/${suffix}${req.nextUrl.search}`;
+  return `${portalBase()}/api/v1/${suffix}${req.nextUrl.search}`;
 }
 
 async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
-  const url = targetUrl(req, ctx.params.path);
+  const path = ctx.params.path;
+  const pathKey = path.join("/");
+
+  if (req.method === "GET" && pathKey === "auth/config") {
+    if (apiProxyDisabled()) {
+      const fb = buildAuthConfigBody("portal proxy disabled; using SPCG_AUTH_METHODS");
+      if (fb) {
+        return Response.json(fb, { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return Response.json({ methods: [], error: "SPCG_AUTH_METHODS not set" }, { status: 502 });
+    }
+  }
+
+  const url = targetUrl(req, path);
   const headers = new Headers();
   req.headers.forEach((value, key) => {
     if (key.toLowerCase() === "host") return;
@@ -29,14 +39,27 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
     init.duplex = "half";
   }
 
-  const res = await fetch(url, init);
-  const outHeaders = new Headers(res.headers);
-  // Next.js may strip hop-by-hop headers; preserve SSE content-type.
-  return new Response(res.body, {
-    status: res.status,
-    statusText: res.statusText,
-    headers: outHeaders,
-  });
+  try {
+    const res = await fetch(url, init);
+    if (req.method === "GET" && pathKey === "auth/config" && (res.status === 404 || res.status >= 500)) {
+      const fb = buildAuthConfigBody(`portal HTTP ${res.status}`);
+      if (fb) return Response.json(fb, { status: 200 });
+    }
+    const outHeaders = new Headers(res.headers);
+    return new Response(res.body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: outHeaders,
+    });
+  } catch (err) {
+    if (req.method === "GET" && pathKey === "auth/config") {
+      const msg = err instanceof Error ? err.message : String(err);
+      const fb = buildAuthConfigBody(`portal unreachable (${msg})`);
+      if (fb) return Response.json(fb, { status: 200 });
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return Response.json({ error: `portal unreachable: ${msg}` }, { status: 502 });
+  }
 }
 
 export const GET = proxy;

@@ -72,7 +72,8 @@ export type LoginResponse = {
   cluster?: string;
 };
 
-import { apiUrl } from "./apiBase";
+import { apiUrl, publicApiBase } from "./apiBase";
+import { runtimeAuthMethods } from "./authMode";
 
 export { apiUrl } from "./apiBase";
 
@@ -88,20 +89,47 @@ export function setPublicApiBase(base: string): void {
   (window as Window & { __SPCG_API_BASE__?: string }).__SPCG_API_BASE__ = base.replace(/\/$/, "");
 }
 
+function clientAuthConfigFallback(detail: string): AuthConfigResponse | null {
+  const methods = runtimeAuthMethods();
+  if (!methods.length) return null;
+  const cfg: AuthConfigResponse = { methods };
+  if (methods.includes("openshift")) {
+    const base = publicApiBase();
+    cfg.openshift = {
+      authorize_path: "/api/v1/auth/openshift/authorize",
+      ...(base ? { authorize_url: `${base}/api/v1/auth/openshift/authorize` } : {}),
+      error: detail,
+    };
+  }
+  return cfg;
+}
+
 export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
-  const res = await fetch(apiUrl("/api/v1/auth/config"), { cache: "no-store", credentials: "include" });
+  let res: Response;
+  try {
+    // Always same-origin: middleware/route serve auth/config from pod env when portal proxy is off.
+    res = await fetch("/api/v1/auth/config", { cache: "no-store", credentials: "include" });
+  } catch (err) {
+    const fb = clientAuthConfigFallback(err instanceof Error ? err.message : String(err));
+    if (fb) return fb;
+    throw err;
+  }
   const bodyText = await res.text();
   if (!res.ok) {
     const short =
       bodyText.startsWith("<!DOCTYPE") || bodyText.startsWith("<html")
         ? `HTTP ${res.status} from UI (portal unreachable or middleware error). Check spcg-ui-portal pod image and readiness.`
         : bodyText.slice(0, 500) || `HTTP ${res.status}`;
+    const fb = clientAuthConfigFallback(short);
+    if (fb) return fb;
     throw new Error(short);
   }
   let cfg: AuthConfigResponse;
   try {
     cfg = JSON.parse(bodyText) as AuthConfigResponse;
   } catch {
+    const fb = clientAuthConfigFallback("Invalid JSON from /api/v1/auth/config");
+    if (fb) return fb;
     throw new Error("Invalid JSON from /api/v1/auth/config — is spcg-ui-portal running the correct image?");
   }
   if (cfg.public_api_base) {

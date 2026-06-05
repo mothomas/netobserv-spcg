@@ -34,11 +34,15 @@ spec:
               value: production
             - name: HOSTNAME
               value: "0.0.0.0"
+            - name: SPCG_AUTH_METHODS
+              value: openshift,kubeconfig
+            - name: SPCG_API_URL
+              value: http://spcg-ui-portal.spcg-control.svc.cluster.local:80
             - name: SPCG_DISABLE_API_PROXY
               value: "true"
-            # openshift-secure-apply.sh sets this from Route spcg-api after apply
+            # Job spcg-oauth-bootstrap sets this from Route spcg-api
             - name: SPCG_PUBLIC_API_BASE
-              value: "https://spcg-api.apps.example.com"
+              value: ""
           envFrom:
             - configMapRef:
                 name: spcg-auth-env

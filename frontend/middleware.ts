@@ -1,40 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-
-function portalBase(): string {
-  return (process.env.SPCG_API_URL || "http://spcg-ui-portal.pcap-frontend.svc.cluster.local:80").replace(
-    /\/$/,
-    ""
-  );
-}
-
-function runtimeAuthMethods(): string[] {
-  const raw = (process.env.SPCG_AUTH_METHODS || "").trim();
-  if (!raw) return [];
-  return raw.split(",").map((m) => m.trim().toLowerCase()).filter(Boolean);
-}
-
-/** Minimal fallback when portal is down but OpenShift login should still render. */
-function authConfigFallback(detail: string): NextResponse | null {
-  if (!runtimeAuthMethods().includes("openshift")) return null;
-  return NextResponse.json(
-    {
-      methods: runtimeAuthMethods(),
-      openshift: {
-        authorize_path: "/api/v1/auth/openshift/authorize",
-        error: detail,
-      },
-    },
-    { status: 200, headers: { "Content-Type": "application/json" } }
-  );
-}
+import { apiProxyDisabled, buildAuthConfigBody, portalBase } from "./lib/authConfigFallback";
 
 async function proxyAuthConfig(request: NextRequest): Promise<NextResponse> {
   const target = portalBase() + request.nextUrl.pathname + request.nextUrl.search;
   try {
     const res = await fetch(target, { method: "GET", redirect: "manual" });
     if (res.status === 404 || res.status >= 500) {
-      const fb = authConfigFallback(`portal HTTP ${res.status}`);
-      if (fb) return fb;
+      const fb = buildAuthConfigBody(`portal HTTP ${res.status}`);
+      if (fb) return NextResponse.json(fb, { status: 200 });
     }
     if (!res.ok) {
       return new NextResponse(await res.text(), { status: res.status });
@@ -42,15 +15,10 @@ async function proxyAuthConfig(request: NextRequest): Promise<NextResponse> {
     return new NextResponse(res.body, { status: res.status, headers: res.headers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const fb = authConfigFallback(`portal unreachable (${msg})`);
-    if (fb) return fb;
+    const fb = buildAuthConfigBody(`portal unreachable (${msg})`);
+    if (fb) return NextResponse.json(fb, { status: 200 });
     return NextResponse.json({ methods: [], error: msg }, { status: 502 });
   }
-}
-
-function apiProxyDisabled(): boolean {
-  const v = (process.env.SPCG_DISABLE_API_PROXY || "").trim().toLowerCase();
-  return v === "true" || v === "1";
 }
 
 export async function middleware(request: NextRequest) {
@@ -58,11 +26,19 @@ export async function middleware(request: NextRequest) {
   if (!pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
+
+  // Auth config: always handle here. Secure layout has no egress — env fallback when proxy disabled.
+  if (request.method === "GET" && pathname === "/api/v1/auth/config") {
+    if (apiProxyDisabled()) {
+      const fb = buildAuthConfigBody("portal proxy disabled; using SPCG_AUTH_METHODS");
+      if (fb) return NextResponse.json(fb, { status: 200 });
+      return NextResponse.json({ methods: [], error: "SPCG_AUTH_METHODS not set" }, { status: 502 });
+    }
+    return proxyAuthConfig(request);
+  }
+
   if (apiProxyDisabled()) {
     return NextResponse.next();
-  }
-  if (request.method === "GET" && pathname === "/api/v1/auth/config") {
-    return proxyAuthConfig(request);
   }
 
   const target = portalBase() + pathname + request.nextUrl.search;

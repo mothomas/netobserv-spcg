@@ -71,6 +71,8 @@ spec:
               value: spcg-landing
             - name: SPCG_CONTROL_NAMESPACE
               value: spcg-control
+            - name: SPCG_AUTH_METHODS
+              value: openshift,kubeconfig
             - name: CORS_ORIGIN
               value: "https://spcg.apps.example.com"
             - name: OAUTH_CLIENT_ID
