@@ -33,3 +33,53 @@ spec:
     - ports:
         - protocol: TCP
           port: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: spcg-landing
+spec:
+  podSelector:
+    matchLabels:
+      app: spcg-frontend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - protocol: UDP
+          port: 5353
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-portal
+  namespace: spcg-landing
+spec:
+  podSelector:
+    matchLabels:
+      app: spcg-frontend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              spcg.io/role: control
+          podSelector:
+            matchLabels:
+              app: spcg-ui-portal
+      ports:
+        - protocol: TCP
+          port: 8080

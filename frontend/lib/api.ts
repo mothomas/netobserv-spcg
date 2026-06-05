@@ -168,16 +168,7 @@ export function authHeaders(sessionId: string): HeadersInit {
 }
 
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const url = apiUrl(path);
-  if (typeof window !== "undefined" && url.startsWith("/api/") && !publicApiBase()) {
-    return Promise.reject(
-      new Error(
-        "Cannot resolve spcg-api URL — open UI on Route spcg (not spcg-api), or run " +
-          "job/spcg-oauth-bootstrap to set SPCG_PUBLIC_API_BASE, then reload."
-      )
-    );
-  }
-  return fetch(url, { ...init, credentials: init?.credentials ?? "include" });
+  return fetch(apiUrl(path), { ...init, credentials: init?.credentials ?? "include" });
 }
 
 function kubeconfigPayload(content: string): string {

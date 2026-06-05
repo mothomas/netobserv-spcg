@@ -55,6 +55,16 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              spcg.io/role: landing
+          podSelector:
+            matchLabels:
+              app: spcg-frontend
+      ports:
+        - protocol: TCP
+          port: 8080
     - ports:
         - protocol: TCP
           port: 8080
