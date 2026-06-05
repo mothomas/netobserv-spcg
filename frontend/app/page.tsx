@@ -143,9 +143,14 @@ export default function Home() {
     fetchAuthConfig()
       .then((cfg) => {
         setAuthConfig(cfg);
-        if (cfg.openshift?.error) {
+        const detail = cfg.openshift?.error?.trim();
+        const benign =
+          !detail ||
+          detail.includes("portal proxy disabled") ||
+          detail.includes("using SPCG_AUTH_METHODS");
+        if (detail && !benign) {
           setLoginError(
-            `${cfg.openshift.error} Ensure Route spcg exists, OAuth secret spcg-oauth-client is set, and portal SA can read Routes.`
+            `${detail} Ensure Route spcg-api exists, OAuth secret spcg-oauth-client is set, and portal SA can read Routes.`
           );
         } else {
           setLoginError(null);
@@ -153,7 +158,7 @@ export default function Home() {
       })
       .catch((e) =>
         setLoginError(
-          `${e instanceof Error ? e.message : String(e)} — check spcg-frontend and spcg-ui-portal pods and Route spcg.`
+          `${e instanceof Error ? e.message : String(e)} — check spcg-frontend image tag (small-20260620+), spcg-ui-portal pod, and Routes spcg / spcg-api.`
         )
       )
       .finally(() => setAuthLoading(false));
