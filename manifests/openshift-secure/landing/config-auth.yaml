@@ -1,4 +1,4 @@
-# Auth mode hint for landing UI only (no OAuth secrets).
+# Auth mode hint for landing UI (no OAuth secrets).
 apiVersion: v1
 kind: ConfigMap
 metadata:

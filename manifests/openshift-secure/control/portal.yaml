@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-ui-portal
+  namespace: spcg-control
+  labels:
+    app: spcg-ui-portal
+    spcg.io/tier: control
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spcg-ui-portal
+  template:
+    metadata:
+      labels:
+        app: spcg-ui-portal
+        spcg.io/tier: control
+    spec:
+      serviceAccountName: default
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-neo4j
+          image: registry.redhat.io/ubi9/ubi-minimal:9.5
+          command:
+            - sh
+            - -c
+            - |
+              until (echo >/dev/tcp/spcg-neo4j.spcg-control.svc.cluster.local/7687) 2>/dev/null; do
+                echo "waiting for neo4j..."
+                sleep 2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+      containers:
+        - name: ui-portal
+          image: docker.io/mothomas/spcg-ui-portal:neo4j-sigma-20260602
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: UI_LISTEN
+              value: ":8080"
+            - name: ENGINE_GRPC_ADDR
+              value: "spcg-backend-engine.pcap-capture.svc.cluster.local:8443"
+            - name: NEO4J_URI
+              value: "bolt://spcg-neo4j.spcg-control.svc.cluster.local:7687"
+            - name: NEO4J_USER
+              value: neo4j
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-neo4j-auth
+                  key: password
+            - name: GRAPH_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-graph-master-key
+                  key: GRAPH_MASTER_KEY
+            - name: SPCG_LANDING_NAMESPACE
+              value: spcg-landing
+            - name: SPCG_CONTROL_NAMESPACE
+              value: spcg-control
+            - name: CORS_ORIGIN
+              value: "https://spcg.apps.example.com"
+            - name: OAUTH_CLIENT_ID
+              value: spcg-ui
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: spcg-oauth-client
+                  key: client-secret
+            - name: OAUTH_TLS_INSECURE_SKIP_VERIFY
+              value: "true"
+            - name: OAUTH_CA_BUNDLE
+              value: /etc/oauth-ca/ca-bundle.crt
+          envFrom:
+            - configMapRef:
+                name: spcg-capture-admission
+            - configMapRef:
+                name: spcg-auth-env
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: oauth-ca
+              mountPath: /etc/oauth-ca
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 20
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: oauth-ca
+          configMap:
+            name: spcg-oauth-serving-ca
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spcg-ui-portal
+  namespace: spcg-control
+spec:
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+  selector:
+    app: spcg-ui-portal
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

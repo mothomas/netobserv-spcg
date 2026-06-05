@@ -1,0 +1,25 @@
+# Greenfield OpenShift: spcg-landing + spcg-control + pcap-capture (no pcap-frontend).
+# Apply: oc apply -k manifests/openshift-secure
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - landing
+  - control
+  - capture/engine.yaml
+  - capture/rbac.yaml
+  - capture/network-policies.yaml
+  - routes.yaml
+  - rbac-oauth.yaml
+images:
+  - name: docker.io/mothomas/spcg-backend-engine
+    newName: quay.io/moby/spcg-backend-engine
+    newTag: small-20260614
+  - name: docker.io/mothomas/spcg-ui-portal
+    newName: quay.io/moby/spcg-ui-portal
+    newTag: small-20260616
+  - name: docker.io/mothomas/spcg-frontend
+    newName: quay.io/moby/spcg-frontend
+    newTag: small-20260616
+patches:
+  - path: patches/tolerations.yaml

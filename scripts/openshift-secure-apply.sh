@@ -7,8 +7,12 @@ PORTAL_IMAGE="${PORTAL_IMAGE:-quay.io/moby/spcg-ui-portal:small-20260616}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260616}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "Applying openshift-secure overlay..."
-oc apply -k "${REPO_ROOT}/manifests/overlays/openshift-secure"
+echo "Applying greenfield openshift-secure manifests..."
+if ! oc get secret spcg-oauth-client -n "$CONTROL_NS" >/dev/null 2>&1; then
+  echo "NOTE: create OAuth secret first (portal will not start without it):"
+  echo "  oc create secret generic spcg-oauth-client -n ${CONTROL_NS} --from-literal=client-secret=<secret>"
+fi
+oc apply -k "${REPO_ROOT}/manifests/openshift-secure"
 
 UI_HOST="$(oc get route spcg -n "$LANDING_NS" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
 API_HOST="$(oc get route spcg-api -n "$CONTROL_NS" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"

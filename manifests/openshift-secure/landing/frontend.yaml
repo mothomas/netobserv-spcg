@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-frontend
+  namespace: spcg-landing
+  labels:
+    app: spcg-frontend
+    spcg.io/tier: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spcg-frontend
+  template:
+    metadata:
+      labels:
+        app: spcg-frontend
+        spcg.io/tier: frontend
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: docker.io/mothomas/spcg-frontend:neo4j-sigma-20260602
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: SPCG_DISABLE_API_PROXY
+              value: "true"
+            # openshift-secure-apply.sh sets this from Route spcg-api after apply
+            - name: SPCG_PUBLIC_API_BASE
+              value: "https://spcg-api.apps.example.com"
+          envFrom:
+            - configMapRef:
+                name: spcg-auth-env
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: next-cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spcg-frontend
+  namespace: spcg-landing
+spec:
+  type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+  selector:
+    app: spcg-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000

@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcg-backend-engine
+  namespace: pcap-capture
+  labels:
+    app: spcg-backend-engine
+    spcg.io/tier: capture
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spcg-backend-engine
+  template:
+    metadata:
+      labels:
+        app: spcg-backend-engine
+        spcg.io/tier: capture
+    spec:
+      serviceAccountName: pcap-executor
+      containers:
+        - name: backend-engine
+          image: docker.io/mothomas/spcg-backend-engine:topo-stats-20260601
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8443
+              name: grpc
+          env:
+            - name: SPCG_BUILD_ID
+              value: "topo-stats-20260601"
+            - name: ENGINE_GRPC_ADDR
+              value: ":8443"
+            - name: COLLECTOR_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CAPTURE_NAMESPACE
+              value: pcap-capture
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: mtls
+              mountPath: /etc/spcg/mtls
+              readOnly: true
+      volumes:
+        - name: mtls
+          secret:
+            secretName: spcg-engine-mtls
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spcg-backend-engine
+  namespace: pcap-capture
+  labels:
+    app: spcg-backend-engine
+spec:
+  selector:
+    app: spcg-backend-engine
+  ports:
+    - name: grpc
+      port: 8443
+      targetPort: 8443

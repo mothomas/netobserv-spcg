@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spcg-auth-env
+  namespace: spcg-control
+data:
+  SPCG_AUTH_METHODS: openshift,kubeconfig
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spcg-capture-admission
+  namespace: spcg-control
+  labels:
+    app: spcg-ui-portal
+    spcg.io/tier: small
+data:
+  MAX_CONCURRENT_SESSIONS: "2"
+  MAX_PODS_PER_SESSION: "10"
+  MAX_CAPTURE_DURATION: "15m"
+  MAX_CAPTURE_BYTES: "104857600"
+  S3_OFFLOAD_ENABLED: "false"
