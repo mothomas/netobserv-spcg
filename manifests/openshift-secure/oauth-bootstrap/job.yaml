@@ -1,5 +1,5 @@
 # Post-install hook: registers OAuthClient + spcg-oauth-client, sets Route-derived env.
-# Image: same family as `oc debug --image-stream openshift/tools:latest` (OCP debug tools, not openshift/cli).
+# Image: registry.redhat.io/openshift4/ose-cli-rhel9 (includes oc). Requires registry.redhat.io pull secret.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -30,9 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: debug
-          # 1) Mirrored release payload (preferred on-cluster): openshift/tools
-          # 2) oc debug fallback when tools IS missing: rhel9/support-tools
-          image: image-registry.openshift-image-registry.svc:5000/openshift/tools:latest
+          image: registry.redhat.io/openshift4/ose-cli-rhel9:latest
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/scripts/bootstrap.sh"]
           env:
