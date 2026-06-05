@@ -38,7 +38,7 @@ export function Sidebar({
           </div>
         </div>
       </div>
-      <nav className="flex-1 px-3 py-4 space-y-1 text-sm">
+      <nav className="flex-1 px-3 py-4 space-y-1 text-sm" aria-label="Primary">
         <NavItem
           label="Workspace"
           active={active === "workspace"}
@@ -53,7 +53,7 @@ export function Sidebar({
         <NavItem
           label="Packet Trace"
           active={active === "trace"}
-          hint={traceActive ? "Live" : traceAvailable ? "Ready" : "Select pod"}
+          hint={traceActive ? "Live" : traceAvailable ? (active === "trace" ? "Active" : "Ready") : "Setup"}
           hintTone={traceActive ? "ok" : "muted"}
           disabled={!traceAvailable}
           onClick={() => traceAvailable && onNavigate?.("trace")}
@@ -108,6 +108,7 @@ function NavItem({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={`w-full flex items-center justify-between px-3 py-2 rounded-siem text-left transition ${
         disabled
           ? "opacity-40 cursor-not-allowed"

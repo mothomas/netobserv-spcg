@@ -11,8 +11,8 @@ export function AppShell({ sidebar, children, topbar }: Props) {
     <div className="min-h-screen flex app-shell-root">
       <aside className="app-shell-sidebar w-56 shrink-0 flex flex-col">{sidebar}</aside>
       <div className="flex-1 flex flex-col min-w-0">
-        {topbar && <header className="app-shell-header shrink-0 px-6 py-3">{topbar}</header>}
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        {topbar && <header className="app-shell-header shrink-0 px-6 py-3 border-b border-siem-border">{topbar}</header>}
+        <main className="flex-1 overflow-auto p-6" id="app-main">
       </div>
     </div>
   );

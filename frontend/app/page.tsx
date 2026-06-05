@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AIDiagnosticModal } from "@/components/AIDiagnosticModal";
 import { ObservabilityWorkbench } from "@/components/ObservabilityWorkbench";
-import { TraceWorkbench } from "@/components/trace/TraceWorkbench";
+import { TraceWorkbench, type TraceView } from "@/components/trace/TraceWorkbench";
 import { S3CapturePanel, type CaptureTierLimits } from "@/components/S3CapturePanel";
 import { AppShell } from "@/components/layout/AppShell";
+import { SectionEmptyState } from "@/components/layout/SectionEmptyState";
 import { Sidebar, type AppSection } from "@/components/layout/Sidebar";
+import { ViewSegment } from "@/components/layout/ViewSegment";
 import { type CaptureSummary, type FlowTopology } from "@/lib/ai";
 import { emptyTopology, normalizeTopology } from "@/lib/topology";
 import { fetchGraphTopology, normalizeSigmaGraph, type SigmaGraph } from "@/lib/graph";
@@ -98,6 +100,8 @@ export default function Home() {
   const [traceGraph, setTraceGraph] = useState<TraceGraph | null>(null);
   const [traceSigmaGraph, setTraceSigmaGraph] = useState<SigmaGraph | null>(null);
   const [traceTargetPod, setTraceTargetPod] = useState<PodDetail | null>(null);
+  const [traceView, setTraceView] = useState<TraceView>("cop");
+  const [tracePaused, setTracePaused] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [s3Config, setS3Config] = useState<S3CaptureConfig>({
     enabled: false,
@@ -123,11 +127,6 @@ export default function Home() {
       }
       setShowAI(false);
       syncAppUrl(section, section === "trace" ? traceId : null);
-      const target =
-        section === "flow" ? flowGraphRef : section === "trace" ? traceRef : workspaceRef;
-      requestAnimationFrame(() => {
-        target.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
     },
     [sessionId, traceId]
   );
@@ -371,11 +370,10 @@ export default function Home() {
       setTraceGraph(resp.graph);
       setTraceSigmaGraph(resp.sigma_graph ?? null);
       setTraceTargetPod(resp.target_pod);
+      setTraceView("cop");
+      setTracePaused(false);
       setActiveSection("trace");
       syncAppUrl("trace", resp.trace_id);
-      requestAnimationFrame(() => {
-        traceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
     } catch (e) {
       setTraceError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -395,6 +393,8 @@ export default function Home() {
       setTraceGraph(null);
       setTraceSigmaGraph(null);
       setTraceTargetPod(null);
+      setTraceView("cop");
+      setTracePaused(false);
       setTraceBusy(false);
       setActiveSection("workspace");
       syncAppUrl("workspace");
@@ -776,14 +776,10 @@ export default function Home() {
     );
   }
 
-  const traceAvailable = workspaceReady && (!!traceId || traceReady);
+  const traceAvailable = workspaceReady;
   const showSection = activeSection === "trace" || activeSection === "flow" ? activeSection : "workspace";
 
   const handleNavigate = (section: AppSection) => {
-    if (section === "trace" && !traceId && traceReady) {
-      startPacketTrace().catch(() => undefined);
-      return;
-    }
     navigateSection(section);
   };
 
@@ -795,18 +791,54 @@ export default function Home() {
             Workspace <span className="mx-1 opacity-50">/</span> Packet Trace
           </p>
           <h1 className="text-lg font-semibold text-siem-text">Infrastructure path discovery</h1>
-          {traceTargetPod && (
+          {traceTargetPod ? (
             <p className="text-xs text-siem-muted font-mono mt-0.5">
               {traceTargetPod.namespace}/{traceTargetPod.name}
               {traceTargetPod.pod_ip ? ` · ${traceTargetPod.pod_ip}` : ""}
             </p>
+          ) : (
+            <p className="text-xs text-siem-muted mt-0.5">
+              Map ingress, egress, and host paths for a single target pod
+            </p>
           )}
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          {traceId && traceGraph && (
+            <>
+              <ViewSegment
+                ariaLabel="Trace visualization"
+                value={traceView}
+                onChange={setTraceView}
+                options={[
+                  { id: "cop", label: "Path map" },
+                  { id: "sigma", label: "Sigma graph", disabled: !traceSigmaGraph?.nodes?.length },
+                ]}
+              />
+              {traceView === "cop" && (
+                <label className="flex items-center gap-2 text-xs text-siem-muted px-2">
+                  <input
+                    type="checkbox"
+                    checked={tracePaused}
+                    onChange={(e) => setTracePaused(e.target.checked)}
+                  />
+                  Pause animation
+                </label>
+              )}
+            </>
+          )}
           <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("workspace")}>
             Back to workspace
           </button>
-          {!traceId && (
+          {traceId ? (
+            <button
+              type="button"
+              className="siem-btn-ghost text-siem-warn border-siem-warn/40"
+              disabled={traceBusy}
+              onClick={() => endTraceSession().catch(() => undefined)}
+            >
+              End trace
+            </button>
+          ) : (
             <button
               type="button"
               className="siem-btn-primary"
@@ -841,9 +873,16 @@ export default function Home() {
           <button
             type="button"
             className="siem-btn-primary"
-            onClick={() => startPacketTrace().catch(() => undefined)}
-            disabled={!traceReady || traceBusy}
-            title={traceReady ? "Start packet trace for selected pod" : "Select exactly one pod"}
+            onClick={() => {
+              if (!traceReady) {
+                setTraceError("Select exactly one pod for Packet Trace.");
+                navigateSection("trace");
+                return;
+              }
+              startPacketTrace().catch(() => undefined);
+            }}
+            disabled={traceBusy}
+            title={traceReady ? "Open Packet Trace workspace for selected pod" : "Open Packet Trace workspace"}
           >
             {traceBusy ? "Starting trace…" : "Packet Trace"}
           </button>
@@ -1022,46 +1061,46 @@ export default function Home() {
       )}
 
       {showSection === "flow" && !sessionId && (
-        <div className="siem-card p-8 text-center text-siem-muted text-sm">
-          Start a capture from the workspace to open the flow graph.
-          <div className="mt-4">
-            <button type="button" className="siem-btn-primary" onClick={() => navigateSection("workspace")}>
-              Go to workspace
-            </button>
-          </div>
-        </div>
+        <SectionEmptyState
+          title="Flow graph"
+          description="Start a capture from the workspace to populate live flow topology and exports."
+          primaryAction={{
+            label: "Go to workspace",
+            onClick: () => navigateSection("workspace"),
+          }}
+        />
       )}
 
       {showSection === "trace" && (
-        <div ref={traceRef} className="scroll-mt-6">
+        <div ref={traceRef} className="scroll-mt-6" role="region" aria-label="Packet Trace">
           {traceId && traceGraph && traceTargetPod && session ? (
             <TraceWorkbench
-              authSessionId={session.session_id}
               traceId={traceId}
               targetPod={traceTargetPod}
               graph={traceGraph}
               sigmaGraph={traceSigmaGraph}
-              onEnd={() => endTraceSession()}
-              embedded
+              view={traceView}
+              paused={tracePaused}
             />
           ) : (
-            <div className="siem-card p-8 max-w-lg mx-auto text-center">
-              <h2 className="text-base font-semibold text-siem-text mb-2">Packet Trace</h2>
-              <p className="text-sm text-siem-muted mb-4">
-                Select exactly one pod in the workspace, then start a trace to map ingress, egress, and host paths.
-              </p>
-              <button
-                type="button"
-                className="siem-btn-primary mr-2"
-                disabled={!traceReady || traceBusy}
-                onClick={() => startPacketTrace().catch(() => undefined)}
-              >
-                {traceBusy ? "Starting…" : "Start trace"}
-              </button>
-              <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("workspace")}>
-                Select pod
-              </button>
-            </div>
+            <SectionEmptyState
+              title="Packet Trace workspace"
+              description="Discover how traffic reaches and leaves a pod — Routes, Services, MetalLB, egress CRDs, and host skeleton — scoped to your RBAC namespaces."
+              steps={[
+                "In Workspace, select exactly one target pod (not an owner with multiple pods).",
+                "Return here or choose Packet Trace in the sidebar.",
+                "Start trace to build the path map and Sigma graph.",
+              ]}
+              primaryAction={{
+                label: traceBusy ? "Starting…" : "Start trace",
+                disabled: !traceReady || traceBusy,
+                onClick: () => startPacketTrace().catch(() => undefined),
+              }}
+              secondaryAction={{
+                label: "Select pod in workspace",
+                onClick: () => navigateSection("workspace"),
+              }}
+            />
           )}
         </div>
       )}
