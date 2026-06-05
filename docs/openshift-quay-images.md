@@ -4,8 +4,8 @@ Images: **quay.io/moby/** (public repositories).
 
 | Component | Image |
 |-----------|--------|
-| Frontend | `quay.io/moby/spcg-frontend:small-20260625` |
-| UI portal | `quay.io/moby/spcg-ui-portal:small-20260624` |
+| Frontend | `quay.io/moby/spcg-frontend:small-20260616` (matches git `70288bf` / CI) |
+| UI portal | `quay.io/moby/spcg-ui-portal:small-20260616` (matches git `70288bf` / CI) |
 | Backend | `quay.io/moby/spcg-backend-engine:small-20260614` |
 
 ## Push from your workstation (maintainers)

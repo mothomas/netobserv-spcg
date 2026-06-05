@@ -2,8 +2,8 @@
 # Apply OpenShift auth ConfigMap, images, and roll out (run from repo root).
 set -euo pipefail
 NS="${NS:-pcap-frontend}"
-PORTAL_IMAGE="${PORTAL_IMAGE:-quay.io/moby/spcg-ui-portal:small-20260606}"
-FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260607}"
+PORTAL_IMAGE="${PORTAL_IMAGE:-quay.io/moby/spcg-ui-portal:small-20260616}"
+FRONTEND_IMAGE="${FRONTEND_IMAGE:-quay.io/moby/spcg-frontend:small-20260616}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "Applying openshift-small overlay..."

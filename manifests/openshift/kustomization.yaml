@@ -13,10 +13,10 @@ images:
     newTag: small-20260614
   - name: docker.io/mothomas/spcg-ui-portal
     newName: quay.io/moby/spcg-ui-portal
-    newTag: small-20260606
+    newTag: small-20260616
   - name: docker.io/mothomas/spcg-frontend
     newName: quay.io/moby/spcg-frontend
-    newTag: small-20260607
+    newTag: small-20260616
 patches:
   - path: patches/tolerations.yaml
   - path: patches/neo4j-pod-security.yaml

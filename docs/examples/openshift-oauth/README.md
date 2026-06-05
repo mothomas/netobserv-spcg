@@ -28,7 +28,7 @@ oc get route spcg -n pcap-frontend
 oc apply -k manifests/overlays/openshift-small
 ```
 
-Images: **quay.io/moby** — portal `small-20260606+`, frontend `small-20260607+` (amd64).
+Images: **quay.io/moby** — portal/frontend `small-20260616+` (amd64; aligns with git `70288bf`).
 
 ### 2. OAuthClient (cluster admin) — same idea as Argo CD
 

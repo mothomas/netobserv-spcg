@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
         - name: ui-portal
-          image: quay.io/moby/spcg-ui-portal:small-20260606
+          image: quay.io/moby/spcg-ui-portal:small-20260616
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: quay.io/moby/spcg-frontend:small-20260607
+          image: quay.io/moby/spcg-frontend:small-20260616
 ---
 apiVersion: apps/v1
 kind: Deployment

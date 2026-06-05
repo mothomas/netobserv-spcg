@@ -222,7 +222,7 @@ OpenShift uses the same **base workloads** as vanilla Kubernetes (including **Ne
 | `openshift/patches/frontend-auth-openshift.yaml` | Auth ConfigMap on frontend |
 | `openshift/patches/neo4j-pod-security.yaml` | OpenShift restricted UID assignment |
 | `openshift/patches/quay-explicit-images.yaml` | Pin **quay.io/moby** image tags |
-| `openshift/kustomization.yaml` | Image rewrites (portal `small-20260606`, frontend `small-20260607`) |
+| `openshift/kustomization.yaml` | Image rewrites (portal/frontend `small-20260616`, built from commit `70288bf`) |
 
 **Security:** [openshift-security.md](./openshift-security.md)
 
