@@ -510,7 +510,7 @@ export default function Home() {
           .then((data) => {
             setTraceId(data.trace_id);
             setTraceGraph(data.graph);
-            setTraceSigmaGraph(data.sigma_graph);
+            setTraceSigmaGraph(data.sigma_graph ?? null);
             setTraceTargetPod(data.target_pod);
             setTraceSourcePods(data.source_pods ?? []);
             setTraceDestPods(data.dest_pods ?? []);
