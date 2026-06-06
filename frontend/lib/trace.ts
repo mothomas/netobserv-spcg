@@ -176,7 +176,7 @@ export async function teardownTrace(authSessionId: string, traceId: string): Pro
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `trace teardown failed (${res.status)}`);
+    throw new Error(text || `trace teardown failed (${res.status})`);
   }
 }
 
