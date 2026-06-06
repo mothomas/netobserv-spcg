@@ -127,6 +127,11 @@ func podToDetail(ctx context.Context, cs kubernetes.Interface, p *corev1.Pod) Po
 	}
 }
 
+// PodToDetail converts a Pod API object to PodDetail.
+func PodToDetail(ctx context.Context, cs kubernetes.Interface, p *corev1.Pod) PodDetail {
+	return podToDetail(ctx, cs, p)
+}
+
 func podIPs(p *corev1.Pod) []string {
 	out := make([]string, 0, len(p.Status.PodIPs))
 	seen := map[string]struct{}{}

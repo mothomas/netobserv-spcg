@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 
-	spcgk8s "github.com/netobserv/spcg/internal/k8s"
-
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -52,11 +50,10 @@ func TestCatalogResolveServiceAndPod(t *testing.T) {
 	cat := &Catalog{CS: cs}
 	out, err := cat.Resolve(context.Background(), DiscoverRequest{
 		Namespaces: []string{"demo"},
-		Selections: []spcgk8s.CaptureSelection{{
-			Namespace: "demo",
-			Type:      "pod",
-			PodName:   "curl-1",
-		}},
+		Source: TraceEndpoint{
+			Mode: EndpointNamespace, Namespace: "demo", Type: "pod", PodName: "curl-1",
+		},
+		Destination: TraceEndpoint{Mode: EndpointIP, IP: "8.8.8.8", External: true},
 		TraceID: "trace-test-1",
 	})
 	if err != nil {

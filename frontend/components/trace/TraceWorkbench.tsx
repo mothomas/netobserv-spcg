@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { PodDetail } from "@/lib/api";
 import type { SigmaGraph } from "@/lib/graph";
-import type { PathSummary, TraceGraph } from "@/lib/trace";
+import type { PathSummary, TraceEndpoint, TraceGraph } from "@/lib/trace";
+import { endpointLabel } from "@/lib/trace";
 import { TraceFlowCanvas } from "./TraceFlowCanvas";
 import { TraceStatsBar } from "./TraceStatsBar";
 
@@ -23,11 +23,18 @@ export type TraceView = "cop" | "sigma";
 
 type Props = {
   traceId: string;
-  targetPod: PodDetail;
+  source: TraceEndpoint;
+  destination: TraceEndpoint;
+  sourcePodCount: number;
+  destPodCount: number;
   graph: TraceGraph;
   sigmaGraph?: SigmaGraph | null;
   view: TraceView;
   paused: boolean;
+  captureActive?: boolean;
+  captureBusy?: boolean;
+  onStartCapture?: () => void;
+  onOpenL7?: () => void;
 };
 
 function statusBadge(status: string) {
@@ -46,7 +53,21 @@ function statusBadge(status: string) {
   );
 }
 
-export function TraceWorkbench({ traceId, targetPod, graph, sigmaGraph, view, paused }: Props) {
+export function TraceWorkbench({
+  traceId,
+  source,
+  destination,
+  sourcePodCount,
+  destPodCount,
+  graph,
+  sigmaGraph,
+  view,
+  paused,
+  captureActive,
+  captureBusy,
+  onStartCapture,
+  onOpenL7,
+}: Props) {
   const paths = graph.paths ?? [];
   const ingress = paths.filter((p: PathSummary) => p.direction === "ingress");
   const egress = paths.filter((p: PathSummary) => p.direction === "egress");
@@ -59,11 +80,14 @@ export function TraceWorkbench({ traceId, targetPod, graph, sigmaGraph, view, pa
     >
       <header className="app-shell-header flex flex-wrap items-center justify-between gap-3 px-5 py-4 shrink-0 border-b border-siem-border">
         <div>
-          <h2 className="text-base font-semibold text-siem-text">Path discovery</h2>
+          <h2 className="text-base font-semibold text-siem-text">Source → Destination</h2>
           <p className="text-xs text-siem-muted mt-0.5 font-mono">
-            {targetPod.namespace}/{targetPod.name}
-            {targetPod.pod_ip ? ` · ${targetPod.pod_ip}` : ""}
-            {targetPod.node_name ? ` · ${targetPod.node_name}` : ""}
+            {endpointLabel(source)}
+            <span className="mx-2 opacity-50">→</span>
+            {endpointLabel(destination)}
+            <span className="mx-2 opacity-30">·</span>
+            {sourcePodCount} source pod{sourcePodCount === 1 ? "" : "s"}
+            {destPodCount > 0 ? ` · ${destPodCount} dest pod${destPodCount === 1 ? "" : "s"}` : ""}
             {` · trace ${traceId.slice(0, 8)}…`}
           </p>
         </div>
@@ -100,11 +124,34 @@ export function TraceWorkbench({ traceId, targetPod, graph, sigmaGraph, view, pa
           )}
         </div>
         <div className="p-4 border-l-4 border-siem-border md:border-l-0 md:border-t-0 border-l-siem-accent/40 bg-siem-panel/20">
-          <h3 className="text-sm font-semibold mb-2">Next: live packet cop</h3>
-          <p className="text-sm text-siem-muted">
-            Phase A maps infrastructure from your RBAC token. Live hop correlation, drop diagnosis, and policy hints
-            will attach here once capture and eBPF evidence are wired to this trace session.
+          <h3 className="text-sm font-semibold mb-2">On demand: live capture & L7</h3>
+          <p className="text-sm text-siem-muted mb-4">
+            Start eBPF capture on resolved source pods only. Service-to-service calls, TLS SNI, DNS, and app ports
+            appear in L7 analysis while the trace session stays open.
           </p>
+          <div className="flex flex-wrap gap-2">
+            {!captureActive ? (
+              <button
+                type="button"
+                className="siem-btn-primary text-sm"
+                disabled={captureBusy || !onStartCapture}
+                onClick={onStartCapture}
+              >
+                {captureBusy ? "Starting capture…" : "Start live capture on path"}
+              </button>
+            ) : (
+              <>
+                <span className="text-[10px] px-2 py-1 rounded-md text-siem-ok border border-siem-ok/30 self-center">
+                  capture live
+                </span>
+                {onOpenL7 && (
+                  <button type="button" className="siem-btn-ghost text-sm" onClick={onOpenL7}>
+                    Open L7 analysis
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </section>

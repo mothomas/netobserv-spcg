@@ -1,4 +1,4 @@
-export type AppSection = "workspace" | "flow" | "trace" | "ai";
+export type AppSection = "workspace" | "flow" | "trace" | "microservices" | "ai";
 
 type Props = {
   product: string;
@@ -6,6 +6,8 @@ type Props = {
   sessionActive?: boolean;
   captureActive?: boolean;
   traceActive?: boolean;
+  microservicesAvailable?: boolean;
+  microservicesActive?: boolean;
   active?: AppSection;
   flowAvailable?: boolean;
   traceAvailable?: boolean;
@@ -20,6 +22,8 @@ export function Sidebar({
   sessionActive,
   captureActive,
   traceActive,
+  microservicesAvailable,
+  microservicesActive,
   active = "workspace",
   flowAvailable,
   traceAvailable,
@@ -57,6 +61,14 @@ export function Sidebar({
           hintTone={traceActive ? "ok" : "muted"}
           disabled={!traceAvailable}
           onClick={() => traceAvailable && onNavigate?.("trace")}
+        />
+        <NavItem
+          label="L7 analysis"
+          active={active === "microservices"}
+          hint={microservicesActive ? "Live" : microservicesAvailable ? "Ready" : "Trace first"}
+          hintTone={microservicesActive ? "ok" : "muted"}
+          disabled={!microservicesAvailable}
+          onClick={() => microservicesAvailable && onNavigate?.("microservices")}
         />
         <NavItem
           label="Flow graph"

@@ -16,9 +16,9 @@ import (
 func SigmaGraphFromTrace(traceID string, g trace.TraceGraph) *SigmaGraph {
 	nodes := make([]SigmaNode, 0, len(g.Nodes))
 	for _, n := range g.Nodes {
-		color, border := traceNodeColors(n.Kind, n.Tracked)
+		color, border := traceNodeColors(n.Kind, n.Tracked || n.Focused)
 		size := 10.0
-		if n.Tracked {
+		if n.Tracked || n.Focused {
 			size = 14
 		}
 		if n.Width > 0 {
@@ -32,7 +32,7 @@ func SigmaGraphFromTrace(traceID string, g trace.TraceGraph) *SigmaGraph {
 			Size:    size,
 			Color:   color,
 			Border:  border,
-			Tracked: n.Tracked,
+			Tracked: n.Tracked || n.Focused,
 			Type:    n.Kind,
 		})
 	}

@@ -24,6 +24,7 @@ type TraceNode struct {
 	Width     float64 `json:"width"`
 	Height    float64 `json:"height"`
 	Tracked   bool    `json:"tracked"`
+	Focused   bool    `json:"focused,omitempty"`
 	Status    string  `json:"status,omitempty"`
 	Detail    string  `json:"detail,omitempty"`
 }
@@ -69,17 +70,23 @@ type TraceLane struct {
 	Width float64 `json:"width"`
 }
 
-// DiscoverRequest mirrors capture selection (namespace-scoped).
+// DiscoverRequest defines source→destination trace targets (namespace-scoped).
 type DiscoverRequest struct {
-	Namespaces  []string                  `json:"namespaces"`
-	Selections  []spcgk8s.CaptureSelection  `json:"selections"`
-	TraceID     string                    `json:"trace_id,omitempty"`
+	Namespaces    []string                 `json:"namespaces"`
+	Source        TraceEndpoint            `json:"source"`
+	Destination   TraceEndpoint            `json:"destination"`
+	Selections    []spcgk8s.CaptureSelection `json:"selections,omitempty"` // legacy
+	TraceID       string                   `json:"trace_id,omitempty"`
 }
 
 // DiscoverResponse is returned from discover/start trace APIs.
 type DiscoverResponse struct {
-	TraceID    string                  `json:"trace_id"`
-	TargetPod  spcgk8s.PodDetail       `json:"target_pod"`
-	Graph    TraceGraph              `json:"graph"`
-	Resolved spcgk8s.ResolvedCapture `json:"resolved,omitempty"`
+	TraceID     string                  `json:"trace_id"`
+	Source      TraceEndpoint           `json:"source"`
+	Destination TraceEndpoint           `json:"destination"`
+	SourcePods  []spcgk8s.PodDetail     `json:"source_pods"`
+	DestPods    []spcgk8s.PodDetail     `json:"dest_pods,omitempty"`
+	TargetPod   spcgk8s.PodDetail       `json:"target_pod"` // primary source pod (compat)
+	Graph       TraceGraph              `json:"graph"`
+	Resolved    spcgk8s.ResolvedCapture `json:"resolved,omitempty"`
 }

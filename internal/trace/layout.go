@@ -9,12 +9,12 @@ const (
 )
 
 var rankLaneLabel = map[int]string{
-	0: "Sources",
+	0: "Source",
 	1: "Ingress",
-	2: "Workload",
+	2: "Mid",
 	3: "Host / CNI",
 	4: "Egress",
-	5: "Dest",
+	5: "Destination",
 }
 
 // rankForKind maps node kind to cop timeline rank.

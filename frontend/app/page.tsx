@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AIDiagnosticModal } from "@/components/AIDiagnosticModal";
 import { ObservabilityWorkbench } from "@/components/ObservabilityWorkbench";
+import { MicroserviceAnalysisWorkbench } from "@/components/microservices/MicroserviceAnalysisWorkbench";
+import { TraceEndpointSelector } from "@/components/trace/TraceEndpointSelector";
 import { TraceWorkbench, type TraceView } from "@/components/trace/TraceWorkbench";
 import { S3CapturePanel, type CaptureTierLimits } from "@/components/S3CapturePanel";
 import { AppShell } from "@/components/layout/AppShell";
@@ -44,7 +46,22 @@ import {
   type S3ExportInfo,
   authHeaders,
 } from "@/lib/api";
-import { fetchTraceGraph, startTrace, syncAppUrl, teardownTrace, type TraceGraph } from "@/lib/trace";
+import {
+  defaultDestEndpoint,
+  defaultSourceEndpoint,
+  endpointLabel,
+  fetchTraceGraph,
+  fetchTraceStatus,
+  sourceEndpointFromSelection,
+  startTrace,
+  startTraceCapture,
+  stopTraceCapture,
+  syncAppUrl,
+  teardownTrace,
+  validateTraceEndpoints,
+  type TraceEndpoint,
+  type TraceGraph,
+} from "@/lib/trace";
 
 type ChunkEvent = {
   session_id: string;
@@ -100,8 +117,14 @@ export default function Home() {
   const [traceGraph, setTraceGraph] = useState<TraceGraph | null>(null);
   const [traceSigmaGraph, setTraceSigmaGraph] = useState<SigmaGraph | null>(null);
   const [traceTargetPod, setTraceTargetPod] = useState<PodDetail | null>(null);
+  const [traceSource, setTraceSource] = useState<TraceEndpoint>(defaultSourceEndpoint());
+  const [traceDest, setTraceDest] = useState<TraceEndpoint>(defaultDestEndpoint());
+  const [traceSourcePods, setTraceSourcePods] = useState<PodDetail[]>([]);
+  const [traceDestPods, setTraceDestPods] = useState<PodDetail[]>([]);
   const [traceView, setTraceView] = useState<TraceView>("cop");
   const [tracePaused, setTracePaused] = useState(false);
+  const [traceCaptureActive, setTraceCaptureActive] = useState(false);
+  const [traceCaptureBusy, setTraceCaptureBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [s3Config, setS3Config] = useState<S3CaptureConfig>({
     enabled: false,
@@ -126,7 +149,7 @@ export default function Home() {
         return;
       }
       setShowAI(false);
-      syncAppUrl(section, section === "trace" ? traceId : null);
+      syncAppUrl(section, section === "trace" || section === "microservices" ? traceId : null);
     },
     [sessionId, traceId]
   );
@@ -198,6 +221,8 @@ export default function Home() {
     setTraceSigmaGraph(null);
     setTraceTargetPod(null);
     setTraceError(null);
+    setTraceCaptureActive(false);
+    setTraceCaptureBusy(false);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -353,25 +378,55 @@ export default function Home() {
   }, [selectedOwnerList, selectedPodList]);
 
   const hasSelection = captureSelections.length > 0;
-  const traceReady = selectedPodList.length === 1;
 
   const s3Active = s3Config.enabled || !!tierLimits?.s3_offload_required;
 
+  useEffect(() => {
+    if (traceId) return;
+    if (selectedPodList.length === 1) {
+      setTraceSource(sourceEndpointFromSelection(captureSelections.find((s) => s.type === "pod") ?? {
+        type: "pod",
+        namespace: selectedPodList[0].namespace,
+        pod_name: selectedPodList[0].name,
+        pod_uid: selectedPodList[0].uid,
+      }));
+      return;
+    }
+    if (selectedOwnerList.length === 1) {
+      const o = selectedOwnerList[0];
+      setTraceSource({
+        mode: "namespace",
+        type: "owner",
+        namespace: o.namespace,
+        owner_kind: o.kind,
+        owner_name: o.name,
+        label_selector: o.label_selector,
+      });
+    }
+  }, [traceId, selectedPodList, selectedOwnerList, captureSelections]);
+
   const startPacketTrace = async () => {
-    if (!session || !traceReady) {
-      setTraceError("Select exactly one pod for Packet Trace.");
+    if (!session) return;
+    const validation = validateTraceEndpoints(traceSource, traceDest);
+    if (validation) {
+      setTraceError(validation);
       return;
     }
     setTraceBusy(true);
     setTraceError(null);
     try {
-      const resp = await startTrace(session.session_id, selectedNamespaces, captureSelections);
+      const resp = await startTrace(session.session_id, selectedNamespaces, traceSource, traceDest);
       setTraceId(resp.trace_id);
       setTraceGraph(resp.graph);
       setTraceSigmaGraph(resp.sigma_graph ?? null);
       setTraceTargetPod(resp.target_pod);
+      setTraceSourcePods(resp.source_pods ?? []);
+      setTraceDestPods(resp.dest_pods ?? []);
+      setTraceSource(resp.source);
+      setTraceDest(resp.destination);
       setTraceView("cop");
       setTracePaused(false);
+      setTraceCaptureActive(false);
       setActiveSection("trace");
       syncAppUrl("trace", resp.trace_id);
     } catch (e) {
@@ -393,11 +448,53 @@ export default function Home() {
       setTraceGraph(null);
       setTraceSigmaGraph(null);
       setTraceTargetPod(null);
+      setTraceSourcePods([]);
+      setTraceDestPods([]);
       setTraceView("cop");
       setTracePaused(false);
+      setTraceCaptureActive(false);
+      setSessionId(null);
+      setTopology(null);
+      setCaptureSummary(null);
       setTraceBusy(false);
       setActiveSection("workspace");
       syncAppUrl("workspace");
+    }
+  }, [session, traceId]);
+
+  const startTraceLiveCapture = useCallback(async () => {
+    if (!session?.session_id || !traceId) return;
+    setTraceCaptureBusy(true);
+    setTraceError(null);
+    try {
+      const resp = await startTraceCapture(session.session_id, traceId);
+      setSessionId(resp.capture_session_id);
+      setTraceCaptureActive(true);
+      setCapturing(true);
+      setCapturePods(
+        traceSourcePods.map((p) => ({ namespace: p.namespace, name: p.name, uid: p.uid }))
+      );
+      setTrackedPodIds(traceSourcePods.map((p) => `${p.namespace}/${p.name}`));
+      setActiveSection("microservices");
+      syncAppUrl("microservices", traceId);
+    } catch (e) {
+      setTraceError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTraceCaptureBusy(false);
+    }
+  }, [session, traceId, traceSourcePods]);
+
+  const stopTraceLiveCapture = useCallback(async () => {
+    if (!session?.session_id || !traceId) return;
+    setTraceCaptureBusy(true);
+    try {
+      await stopTraceCapture(session.session_id, traceId);
+      setTraceCaptureActive(false);
+      setCapturing(false);
+    } catch (e) {
+      setTraceError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTraceCaptureBusy(false);
     }
   }, [session, traceId]);
 
@@ -415,8 +512,46 @@ export default function Home() {
             setTraceGraph(data.graph);
             setTraceSigmaGraph(data.sigma_graph);
             setTraceTargetPod(data.target_pod);
+            setTraceSourcePods(data.source_pods ?? []);
+            setTraceDestPods(data.dest_pods ?? []);
+            if (data.source) setTraceSource(data.source);
+            if (data.destination) setTraceDest(data.destination);
+            if (data.capture_session_id) {
+              setSessionId(data.capture_session_id);
+              setTraceCaptureActive(!!data.capture_active);
+              setCapturing(!!data.capture_active);
+            }
           })
           .catch((e) => setTraceError(e instanceof Error ? e.message : String(e)));
+      }
+    } else if (section === "microservices") {
+      setActiveSection("microservices");
+      if (tid && tid !== traceId) {
+        fetchTraceGraph(session.session_id, tid)
+          .then((data) => {
+            setTraceId(data.trace_id);
+            setTraceGraph(data.graph);
+            setTraceSourcePods(data.source_pods ?? []);
+            setTraceDestPods(data.dest_pods ?? []);
+            if (data.source) setTraceSource(data.source);
+            if (data.destination) setTraceDest(data.destination);
+            if (data.capture_session_id) {
+              setSessionId(data.capture_session_id);
+              setTraceCaptureActive(!!data.capture_active);
+              setCapturing(!!data.capture_active);
+            }
+          })
+          .catch((e) => setTraceError(e instanceof Error ? e.message : String(e)));
+      } else if (tid && session.session_id) {
+        fetchTraceStatus(session.session_id, tid)
+          .then((st) => {
+            if (st.capture_session_id) {
+              setSessionId(st.capture_session_id);
+              setTraceCaptureActive(!!st.capture_active);
+              setCapturing(!!st.capture_active);
+            }
+          })
+          .catch(() => undefined);
       }
     }
   }, [session?.session_id, workspaceReady, traceId]);
@@ -595,10 +730,11 @@ export default function Home() {
   }, [sessionId, session?.session_id, loadFlowTopology]);
 
   useEffect(() => {
-    if (!sessionId || !capturing || !session?.session_id) return;
+    if (!sessionId || !session?.session_id) return;
+    if (!capturing && !traceCaptureActive) return;
     const id = window.setInterval(() => loadFlowTopology(), 8000);
     return () => window.clearInterval(id);
-  }, [sessionId, capturing, session?.session_id, loadFlowTopology]);
+  }, [sessionId, capturing, traceCaptureActive, session?.session_id, loadFlowTopology]);
 
   useEffect(() => {
     if (!workspaceReady || !session?.session_id) return;
@@ -777,7 +913,11 @@ export default function Home() {
   }
 
   const traceAvailable = workspaceReady;
-  const showSection = activeSection === "trace" || activeSection === "flow" ? activeSection : "workspace";
+  const microservicesAvailable = workspaceReady && !!traceId;
+  const showSection =
+    activeSection === "trace" || activeSection === "flow" || activeSection === "microservices"
+      ? activeSection
+      : "workspace";
 
   const handleNavigate = (section: AppSection) => {
     navigateSection(section);
@@ -790,15 +930,16 @@ export default function Home() {
           <p className="text-xs text-siem-muted">
             Workspace <span className="mx-1 opacity-50">/</span> Packet Trace
           </p>
-          <h1 className="text-lg font-semibold text-siem-text">Infrastructure path discovery</h1>
-          {traceTargetPod ? (
+          <h1 className="text-lg font-semibold text-siem-text">Source → destination path discovery</h1>
+          {traceId ? (
             <p className="text-xs text-siem-muted font-mono mt-0.5">
-              {traceTargetPod.namespace}/{traceTargetPod.name}
-              {traceTargetPod.pod_ip ? ` · ${traceTargetPod.pod_ip}` : ""}
+              {endpointLabel(traceSource)}
+              <span className="mx-2 opacity-50">→</span>
+              {endpointLabel(traceDest)}
             </p>
           ) : (
             <p className="text-xs text-siem-muted mt-0.5">
-              Map ingress, egress, and host paths for a single target pod
+              Select source and destination, then run discovery across all related networking artefacts
             </p>
           )}
         </div>
@@ -842,10 +983,10 @@ export default function Home() {
             <button
               type="button"
               className="siem-btn-primary"
-              disabled={!traceReady || traceBusy}
+              disabled={traceBusy}
               onClick={() => startPacketTrace().catch(() => undefined)}
             >
-              {traceBusy ? "Starting…" : "Start trace"}
+              {traceBusy ? "Running discovery…" : "Run trace"}
             </button>
           )}
         </div>
@@ -860,6 +1001,37 @@ export default function Home() {
           {sessionId ? `Session ${sessionId.slice(0, 8)}…` : "Start a capture to populate the graph"}
         </p>
       </div>
+    ) : showSection === "microservices" ? (
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs text-siem-muted">
+            Workspace <span className="mx-1 opacity-50">/</span> Packet Trace <span className="mx-1 opacity-50">/</span> L7 analysis
+          </p>
+          <h1 className="text-lg font-semibold text-siem-text">Microservice & L7 analysis</h1>
+          {traceId && (
+            <p className="text-xs text-siem-muted font-mono mt-0.5">
+              {endpointLabel(traceSource)}
+              <span className="mx-2 opacity-50">→</span>
+              {endpointLabel(traceDest)}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
+          <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("trace")}>
+            Back to trace
+          </button>
+          {!traceCaptureActive && traceId && (
+            <button
+              type="button"
+              className="siem-btn-primary"
+              disabled={traceCaptureBusy}
+              onClick={() => startTraceLiveCapture().catch(() => undefined)}
+            >
+              {traceCaptureBusy ? "Starting…" : "Start live capture"}
+            </button>
+          )}
+        </div>
+      </div>
     ) : (
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -873,18 +1045,11 @@ export default function Home() {
           <button
             type="button"
             className="siem-btn-primary"
-            onClick={() => {
-              if (!traceReady) {
-                setTraceError("Select exactly one pod for Packet Trace.");
-                navigateSection("trace");
-                return;
-              }
-              startPacketTrace().catch(() => undefined);
-            }}
+            onClick={() => navigateSection("trace")}
             disabled={traceBusy}
-            title={traceReady ? "Open Packet Trace workspace for selected pod" : "Open Packet Trace workspace"}
+            title="Open Packet Trace workspace"
           >
-            {traceBusy ? "Starting trace…" : "Packet Trace"}
+            Packet Trace
           </button>
           {!capturing ? (
             <button
@@ -913,6 +1078,8 @@ export default function Home() {
           sessionActive={!!session}
           captureActive={capturing}
           traceActive={!!traceId}
+          microservicesAvailable={microservicesAvailable}
+          microservicesActive={traceCaptureActive}
           active={showAI ? "ai" : activeSection}
           flowAvailable={!!sessionId}
           traceAvailable={traceAvailable}
@@ -1072,37 +1239,99 @@ export default function Home() {
       )}
 
       {showSection === "trace" && (
-        <div ref={traceRef} className="scroll-mt-6" role="region" aria-label="Packet Trace">
-          {traceId && traceGraph && traceTargetPod && session ? (
+        <div ref={traceRef} className="scroll-mt-6 space-y-4" role="region" aria-label="Packet Trace">
+          {traceId && traceGraph && session ? (
             <TraceWorkbench
               traceId={traceId}
-              targetPod={traceTargetPod}
+              source={traceSource}
+              destination={traceDest}
+              sourcePodCount={traceSourcePods.length || 1}
+              destPodCount={traceDestPods.length}
               graph={traceGraph}
               sigmaGraph={traceSigmaGraph}
               view={traceView}
               paused={tracePaused}
+              captureActive={traceCaptureActive}
+              captureBusy={traceCaptureBusy}
+              onStartCapture={() => startTraceLiveCapture().catch(() => undefined)}
+              onOpenL7={() => navigateSection("microservices")}
             />
           ) : (
-            <SectionEmptyState
-              title="Packet Trace workspace"
-              description="Discover how traffic reaches and leaves a pod — Routes, Services, MetalLB, egress CRDs, and host skeleton — scoped to your RBAC namespaces."
-              steps={[
-                "In Workspace, select exactly one target pod (not an owner with multiple pods).",
-                "Return here or choose Packet Trace in the sidebar.",
-                "Start trace to build the path map and Sigma graph.",
-              ]}
-              primaryAction={{
-                label: traceBusy ? "Starting…" : "Start trace",
-                disabled: !traceReady || traceBusy,
-                onClick: () => startPacketTrace().catch(() => undefined),
-              }}
-              secondaryAction={{
-                label: "Select pod in workspace",
-                onClick: () => navigateSection("workspace"),
-              }}
-            />
+            <>
+              <TraceEndpointSelector
+                source={traceSource}
+                destination={traceDest}
+                onSourceChange={setTraceSource}
+                onDestChange={setTraceDest}
+                workloadGroups={workloadGroups}
+                namespaces={selectedNamespaces}
+                disabled={traceBusy}
+              />
+              <div className="flex flex-wrap gap-2 justify-end">
+                <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("workspace")}>
+                  Back to workspace
+                </button>
+                <button
+                  type="button"
+                  className="siem-btn-primary"
+                  disabled={traceBusy}
+                  onClick={() => startPacketTrace().catch(() => undefined)}
+                >
+                  {traceBusy ? "Running discovery…" : "Run trace"}
+                </button>
+              </div>
+            </>
           )}
         </div>
+      )}
+
+      {showSection === "microservices" && traceId && sessionId && session && (
+        <div className="scroll-mt-6">
+          <MicroserviceAnalysisWorkbench
+            traceId={traceId}
+            source={traceSource}
+            destination={traceDest}
+            captureSessionId={sessionId}
+            topology={topology}
+            captureSummary={captureSummary}
+            loading={flowsLoading}
+            captureActive={traceCaptureActive}
+            onRefresh={() => loadFlowTopology()}
+            onStopCapture={() => stopTraceLiveCapture().catch(() => undefined)}
+          />
+        </div>
+      )}
+
+      {showSection === "microservices" && traceId && !sessionId && (
+        <SectionEmptyState
+          title="L7 microservice analysis"
+          description="Start live capture from Packet Trace to analyze service-to-service calls, TLS SNI, DNS, and application ports on the focused path."
+          steps={[
+            "Run source → destination path discovery in Packet Trace",
+            "Click Start live capture on path",
+            "Generate traffic between endpoints and refresh L7 stats",
+          ]}
+          primaryAction={{
+            label: "Open Packet Trace",
+            onClick: () => navigateSection("trace"),
+          }}
+          secondaryAction={{
+            label: "Start capture now",
+            onClick: () => startTraceLiveCapture().catch(() => undefined),
+            disabled: traceCaptureBusy,
+          }}
+        />
+      )}
+
+      {showSection === "microservices" && !traceId && (
+        <SectionEmptyState
+          title="L7 microservice analysis"
+          description="Complete Packet Trace discovery first — L7 analysis is scoped to an active trace session."
+          primaryAction={{
+            label: "Go to workspace",
+            onClick: () => navigateSection("workspace"),
+          }}
+        />
       )}
 
 

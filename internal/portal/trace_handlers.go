@@ -21,6 +21,7 @@ func (s *Server) registerTraceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/trace/start", s.handleTraceStart)
 	mux.HandleFunc("/api/v1/trace/graph", s.handleTraceGraph)
 	mux.HandleFunc("/api/v1/trace/teardown/", s.handleTraceTeardown)
+	s.registerTraceCaptureRoutes(mux)
 }
 
 func (s *Server) handleTraceDiscover(w http.ResponseWriter, r *http.Request) {
@@ -98,12 +99,22 @@ func (s *Server) handleTraceGraph(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeTraceJSON(w http.ResponseWriter, resp *trace.DiscoverResponse, sigma *graphdb.SigmaGraph) {
+	captureID := ""
+	if resp.TraceID != "" {
+		captureID = traceCaptureSessionID(resp.TraceID)
+	}
 	writeJSON(w, map[string]interface{}{
-		"trace_id":    resp.TraceID,
-		"target_pod":  resp.TargetPod,
-		"graph":       resp.Graph,
-		"resolved":    resp.Resolved,
-		"sigma_graph": sigma,
+		"trace_id":           resp.TraceID,
+		"source":             resp.Source,
+		"destination":        resp.Destination,
+		"source_pods":        resp.SourcePods,
+		"dest_pods":          resp.DestPods,
+		"target_pod":         resp.TargetPod,
+		"graph":              resp.Graph,
+		"resolved":           resp.Resolved,
+		"sigma_graph":        sigma,
+		"capture_session_id": captureID,
+		"capture_active":     captureID != "" && captureStreamActive(captureID),
 	})
 }
 
@@ -120,6 +131,10 @@ func (s *Server) handleTraceTeardown(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.requireTraceAccess(w, r, traceID) {
 		return
+	}
+	captureID := stopTraceCapture(traceID)
+	if captureID != "" {
+		teardownCaptureSession(captureID)
 	}
 	deleteTraceSession(traceID)
 	if s.Graph != nil && s.Graph.Enabled() {
@@ -147,8 +162,8 @@ func (s *Server) runTraceDiscover(r *http.Request) (*trace.DiscoverResponse, err
 	if len(req.Namespaces) == 0 {
 		return nil, errTraceNamespaces
 	}
-	if len(req.Selections) == 0 {
-		return nil, errTraceSelections
+	if req.Source.Mode == "" && len(req.Selections) == 0 {
+		return nil, errTraceSource
 	}
 	csWrap, err := s.userClient(r)
 	if err != nil {
@@ -176,8 +191,8 @@ func (s *Server) requireTraceAccess(w http.ResponseWriter, r *http.Request, trac
 }
 
 var (
-	errTraceNamespaces  = &traceError{"namespaces are required"}
-	errTraceSelections  = &traceError{"selections are required"}
+	errTraceNamespaces = &traceError{"namespaces are required"}
+	errTraceSource     = &traceError{"source endpoint is required"}
 )
 
 type traceError struct{ msg string }

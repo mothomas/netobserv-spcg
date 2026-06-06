@@ -7,27 +7,56 @@ import (
 	spcgk8s "github.com/netobserv/spcg/internal/k8s"
 )
 
+const (
+	rankSource = 0
+	rankDest   = 5
+)
+
 type graphBuilder struct {
-	target   spcgk8s.PodDetail
-	scope    map[string]struct{}
-	podID    string
-	nodeID   string
-	nodes    []TraceNode
-	edges    []TraceEdge
-	paths    []PathSummary
-	nodeSet  map[string]struct{}
-	edgeSet  map[string]struct{}
+	sourcePods []spcgk8s.PodDetail
+	destPods   []spcgk8s.PodDetail
+	destIP     *ipEndpointNode
+	scope      map[string]struct{}
+	anchor     spcgk8s.PodDetail
+	sourceIDs  map[string]struct{}
+	destIDs    map[string]struct{}
+	nodes      []TraceNode
+	edges      []TraceEdge
+	paths      []PathSummary
+	nodeSet    map[string]struct{}
+	edgeSet    map[string]struct{}
 }
 
-func newGraphBuilder(target spcgk8s.PodDetail, scope map[string]struct{}) *graphBuilder {
-	podID := nodeID("pod", target.Namespace, target.Name)
-	return &graphBuilder{
-		target:  target,
-		scope:   scope,
-		podID:   podID,
-		nodeSet: map[string]struct{}{},
-		edgeSet: map[string]struct{}{},
+func newGraphBuilder(sourcePods, destPods []spcgk8s.PodDetail, destIP *ipEndpointNode, scope map[string]struct{}) *graphBuilder {
+	anchor := spcgk8s.PodDetail{}
+	if len(sourcePods) > 0 {
+		anchor = sourcePods[0]
 	}
+	b := &graphBuilder{
+		sourcePods: sourcePods,
+		destPods:   destPods,
+		destIP:     destIP,
+		scope:      scope,
+		anchor:     anchor,
+		sourceIDs:  map[string]struct{}{},
+		destIDs:    map[string]struct{}{},
+		nodeSet:    map[string]struct{}{},
+		edgeSet:    map[string]struct{}{},
+	}
+	for _, p := range sourcePods {
+		b.sourceIDs[podNodeID(p)] = struct{}{}
+	}
+	for _, p := range destPods {
+		b.destIDs[podNodeID(p)] = struct{}{}
+	}
+	if destIP != nil {
+		b.destIDs[destIP.ID] = struct{}{}
+	}
+	return b
+}
+
+func podNodeID(p spcgk8s.PodDetail) string {
+	return nodeID("pod", p.Namespace, p.Name)
 }
 
 func (b *graphBuilder) hasNode(id string) bool {
@@ -35,21 +64,55 @@ func (b *graphBuilder) hasNode(id string) bool {
 	return ok
 }
 
-func (b *graphBuilder) addNode(id, label, kind, ns string, tracked bool, detail string) {
+func (b *graphBuilder) anchorPodID() string {
+	if b.anchor.Name == "" {
+		return ""
+	}
+	return podNodeID(b.anchor)
+}
+
+func (b *graphBuilder) anchorNodeID() string {
+	if b.anchor.NodeName == "" {
+		return ""
+	}
+	return nodeID("node", "", b.anchor.NodeName)
+}
+
+func (b *graphBuilder) seedEndpoints() {
+	for _, p := range b.sourcePods {
+		id := podNodeID(p)
+		b.addNode(id, p.Name, "pod", p.Namespace, true, false, rankSource, p.PodIP)
+		if p.NodeName != "" {
+			nid := nodeID("node", "", p.NodeName)
+			b.addNode(nid, p.NodeName, "node", "", false, false, rankForKind("node"), "scheduled node")
+			b.addEdge(id, nid, "scheduled", false, "")
+		}
+	}
+	for _, p := range b.destPods {
+		id := podNodeID(p)
+		b.addNode(id, p.Name, "pod", p.Namespace, true, false, rankDest, p.PodIP)
+	}
+	if b.destIP != nil {
+		b.addNode(b.destIP.ID, b.destIP.Label, b.destIP.Kind, "", true, false, rankDest, b.destIP.Detail)
+	}
+}
+
+func (b *graphBuilder) addNode(id, label, kind, ns string, tracked, focused bool, rank int, detail string) {
 	if _, ok := b.nodeSet[id]; ok {
 		return
 	}
 	b.nodeSet[id] = struct{}{}
-	if id == nodeID("node", "", b.target.NodeName) {
-		b.nodeID = id
+	if rank < 0 {
+		rank = rankForKind(kind)
 	}
 	b.nodes = append(b.nodes, TraceNode{
 		ID:        id,
 		Label:     label,
 		Kind:      kind,
 		Namespace: ns,
-		Rank:      rankForKind(kind),
+		Rank:      rank,
 		Tracked:   tracked,
+		Focused:   focused,
 		Status:    string(HopPending),
 		Detail:    detail,
 	})
@@ -88,6 +151,7 @@ func (b *graphBuilder) addPath(direction, resource, ns, kind, status, detail str
 }
 
 func (b *graphBuilder) finish(traceID string) TraceGraph {
+	markFocusPath(b)
 	g, lanes := applyLayout(b.nodes)
 	g.Edges = b.edges
 	g.Paths = b.paths

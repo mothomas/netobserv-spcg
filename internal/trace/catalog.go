@@ -17,98 +17,128 @@ import (
 )
 
 var (
-	gvrRoute = schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}
-	gvrEgressIP = schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "egressips"}
+	gvrRoute         = schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}
+	gvrEgressIP      = schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "egressips"}
 	gvrEgressService = schema.GroupVersionResource{Group: "egressservice.k8s.ovn.org", Version: "v1", Resource: "egressservices"}
 	gvrEgressNetwork = schema.GroupVersionResource{Group: "network.openshift.io", Version: "v1", Resource: "egressnetworks"}
-	gvrBGPPeer = schema.GroupVersionResource{Group: "metallb.io", Version: "v1beta1", Resource: "bgppeers"}
-	gvrIPPool = schema.GroupVersionResource{Group: "metallb.io", Version: "v1beta1", Resource: "ipaddresspools"}
-	gvrNAD = schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"}
+	gvrBGPPeer       = schema.GroupVersionResource{Group: "metallb.io", Version: "v1beta1", Resource: "bgppeers"}
+	gvrIPPool        = schema.GroupVersionResource{Group: "metallb.io", Version: "v1beta1", Resource: "ipaddresspools"}
+	gvrNAD           = schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"}
 )
 
-// Catalog discovers ingress/egress infrastructure paths for a target pod.
+// Catalog discovers ingress/egress infrastructure paths between source and destination endpoints.
 type Catalog struct {
 	CS kubernetes.Interface
 	DC *DynamicClient
 }
 
-// Resolve expands selections, discovers paths, and builds the infrastructure graph.
+// Resolve expands endpoints, discovers paths, and builds the infrastructure graph.
 func (c *Catalog) Resolve(ctx context.Context, req DiscoverRequest) (*DiscoverResponse, error) {
 	if c == nil || c.CS == nil {
 		return nil, fmt.Errorf("kubernetes client is required")
 	}
-	if len(req.Selections) == 0 {
-		return nil, fmt.Errorf("at least one workload selection is required")
-	}
-	resolved, err := spcgk8s.ResolveCaptureSelections(ctx, c.CS, req.Selections)
-	if err != nil {
+	if err := normalizeDiscoverRequest(&req); err != nil {
 		return nil, err
 	}
-	target, err := pickTargetPod(resolved.Pods)
-	if err != nil {
-		return nil, err
+	if len(req.Namespaces) == 0 {
+		return nil, fmt.Errorf("namespaces are required")
 	}
 
-	nsScope := namespaceScope(req.Namespaces, target.Namespace)
-	builder := newGraphBuilder(target, nsScope)
-
-	builder.addNode(nodeID("pod", target.Namespace, target.Name), target.Name, "pod", target.Namespace, true, target.PodIP)
-	if target.NodeName != "" {
-		builder.addNode(nodeID("node", "", target.NodeName), target.NodeName, "node", "", false, "scheduled node")
-		builder.addEdge(builder.podID, builder.nodeID, "scheduled", true, "")
-	}
-
-	svcHits, err := c.discoverServices(ctx, target, nsScope, builder)
+	src, err := resolveEndpoint(ctx, c.CS, req.Source, req.Namespaces)
 	if err != nil {
+		return nil, fmt.Errorf("source: %w", err)
+	}
+	dst, err := resolveEndpoint(ctx, c.CS, req.Destination, req.Namespaces)
+	if err != nil {
+		return nil, fmt.Errorf("destination: %w", err)
+	}
+	if len(src.Pods) == 0 && src.IPNode == nil {
+		return nil, fmt.Errorf("source resolved to no targets")
+	}
+
+	scope := namespacesForScope(req.Namespaces, src.Pods, dst.Pods)
+	builder := newGraphBuilder(src.Pods, dst.Pods, dst.IPNode, scope)
+	builder.seedEndpoints()
+
+	allSvcHits := map[string]corev1.Service{}
+	for _, pod := range src.Pods {
+		hits, err := c.discoverServices(ctx, pod, scope, builder)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range hits {
+			allSvcHits[k] = v
+		}
+		if err := c.discoverNADs(ctx, pod, builder); err != nil {
+			return nil, err
+		}
+		_ = c.discoverNetworkPolicies(ctx, pod, builder)
+	}
+	for _, pod := range dst.Pods {
+		hits, err := c.discoverServices(ctx, pod, scope, builder)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range hits {
+			allSvcHits[k] = v
+		}
+		_ = c.discoverNetworkPolicies(ctx, pod, builder)
+	}
+
+	if len(src.Pods) > 0 {
+		if err := c.discoverRoutes(ctx, src.Pods[0].Namespace, allSvcHits, builder); err != nil {
+			return nil, err
+		}
+	}
+	if err := c.discoverMetalLB(ctx, allSvcHits, builder); err != nil {
 		return nil, err
 	}
-	if err := c.discoverRoutes(ctx, target.Namespace, svcHits, builder); err != nil {
-		return nil, err
+	if len(src.Pods) > 0 {
+		if err := c.discoverEgress(ctx, scope, src.Pods[0], builder); err != nil {
+			return nil, err
+		}
 	}
-	if err := c.discoverMetalLB(ctx, svcHits, builder); err != nil {
-		return nil, err
-	}
-	if err := c.discoverEgress(ctx, nsScope, target, builder); err != nil {
-		return nil, err
-	}
-	if err := c.discoverNADs(ctx, target, builder); err != nil {
-		return nil, err
-	}
-	_ = c.discoverNetworkPolicies(ctx, target, builder)
 
 	graph := builder.finish(req.TraceID)
+	target := src.Pods[0]
+	resolved, _ := spcgk8s.ResolveCaptureSelections(ctx, c.CS, selectionsFromPods(src.Pods))
+
 	return &DiscoverResponse{
-		TraceID:   req.TraceID,
-		TargetPod: target,
-		Graph:     graph,
-		Resolved:  *resolved,
+		TraceID:     req.TraceID,
+		Source:      req.Source,
+		Destination: req.Destination,
+		SourcePods:  src.Pods,
+		DestPods:    dst.Pods,
+		TargetPod:   target,
+		Graph:       graph,
+		Resolved:    derefResolved(resolved),
 	}, nil
 }
 
-func pickTargetPod(pods []spcgk8s.PodDetail) (spcgk8s.PodDetail, error) {
-	if len(pods) == 0 {
-		return spcgk8s.PodDetail{}, fmt.Errorf("no pods resolved from selections")
-	}
-	if len(pods) == 1 {
-		return pods[0], nil
-	}
-	return spcgk8s.PodDetail{}, fmt.Errorf("packet trace requires exactly one pod target (got %d); select a single pod or one-replica owner", len(pods))
-}
-
-func namespaceScope(requested []string, podNS string) map[string]struct{} {
-	out := map[string]struct{}{podNS: {}}
-	for _, ns := range requested {
-		ns = strings.TrimSpace(ns)
-		if ns != "" {
-			out[ns] = struct{}{}
-		}
+func selectionsFromPods(pods []spcgk8s.PodDetail) []spcgk8s.CaptureSelection {
+	out := make([]spcgk8s.CaptureSelection, 0, len(pods))
+	for _, p := range pods {
+		out = append(out, spcgk8s.CaptureSelection{
+			Namespace: p.Namespace,
+			Type:      "pod",
+			PodName:   p.Name,
+			PodUID:    p.UID,
+		})
 	}
 	return out
+}
+
+func derefResolved(r *spcgk8s.ResolvedCapture) spcgk8s.ResolvedCapture {
+	if r == nil {
+		return spcgk8s.ResolvedCapture{}
+	}
+	return *r
 }
 
 func (c *Catalog) discoverServices(ctx context.Context, pod spcgk8s.PodDetail, scope map[string]struct{}, b *graphBuilder) (map[string]corev1.Service, error) {
 	hits := map[string]corev1.Service{}
 	podIPs := podIPSet(pod)
+	podID := podNodeID(pod)
 	for ns := range scope {
 		svcs, err := c.CS.CoreV1().Services(ns).List(ctx, metav1.ListOptions{})
 		if err != nil {
@@ -139,9 +169,13 @@ func (c *Catalog) discoverServices(ctx context.Context, pod spcgk8s.PodDetail, s
 			if svc.Spec.Type == corev1.ServiceTypeNodePort && len(svc.Spec.Ports) > 0 && svc.Spec.Ports[0].NodePort != 0 {
 				detail = fmt.Sprintf("NodePort %d", svc.Spec.Ports[0].NodePort)
 			}
-			b.addNode(id, svc.Name, kind, svc.Namespace, false, detail)
+			b.addNode(id, svc.Name, kind, svc.Namespace, false, false, rankForKind(kind), detail)
 			b.addPath("ingress", svc.Name, svc.Namespace, kind, "discovered", detail)
-			b.addEdge(id, b.podID, "direct", true, "")
+			if _, src := b.sourceIDs[podID]; src {
+				b.addEdge(id, podID, "direct", false, "")
+			} else if _, dst := b.destIDs[podID]; dst {
+				b.addEdge(id, podID, "direct", false, "")
+			}
 		}
 	}
 	return hits, nil
@@ -199,7 +233,7 @@ func (c *Catalog) discoverRoutes(ctx context.Context, podNS string, services map
 	}
 	items, err := c.DC.list(ctx, gvrRoute, podNS)
 	if err != nil {
-		return nil // routes API not available
+		return nil
 	}
 	svcByName := map[string]corev1.Service{}
 	for _, svc := range services {
@@ -215,16 +249,16 @@ func (c *Catalog) discoverRoutes(ctx context.Context, podNS string, services map
 			continue
 		}
 		id := nodeID("route", item.GetNamespace(), item.GetName())
-		b.addNode(id, item.GetName(), "route", item.GetNamespace(), false, host)
+		b.addNode(id, item.GetName(), "route", item.GetNamespace(), false, false, rankForKind("route"), host)
 		b.addPath("ingress", item.GetName(), item.GetNamespace(), "route", "discovered", "https://"+host)
 		svcID := nodeID("service", item.GetNamespace(), toName)
-		b.addEdge(id, svcID, "https", true, host)
+		b.addEdge(id, svcID, "https", false, host)
 
 		extID := nodeID("external", "", "client-route")
 		if !b.hasNode(extID) {
-			b.addNode(extID, "Client", "external-client", "", false, "via Route")
+			b.addNode(extID, "Client", "external-client", "", false, false, rankForKind("external-client"), "via Route")
 		}
-		b.addEdge(extID, id, "ingress", true, "")
+		b.addEdge(extID, id, "ingress", false, "")
 	}
 	return nil
 }
@@ -248,14 +282,14 @@ func (c *Catalog) discoverMetalLB(ctx context.Context, services map[string]corev
 			continue
 		}
 		lbID := nodeID("loadbalancer", svc.Namespace, svc.Name+"-vip")
-		b.addNode(lbID, vip, "loadbalancer-external", svc.Namespace, false, "MetalLB VIP")
+		b.addNode(lbID, vip, "loadbalancer-external", svc.Namespace, false, false, rankForKind("loadbalancer-external"), "MetalLB VIP")
 		b.addPath("ingress", vip, svc.Namespace, "metallb-pool", "discovered", svc.Name)
 		svcID := nodeID("service", svc.Namespace, svc.Name)
 		b.addEdge(lbID, svcID, "direct", false, "")
 
 		extID := nodeID("external", "", "client-lb")
 		if !b.hasNode(extID) {
-			b.addNode(extID, "Client", "external-client", "", false, "via LB")
+			b.addNode(extID, "Client", "external-client", "", false, false, rankForKind("external-client"), "via LB")
 		}
 		b.addEdge(extID, lbID, "ingress", false, "")
 	}
@@ -267,7 +301,7 @@ func (c *Catalog) discoverMetalLB(ctx context.Context, services map[string]corev
 	for _, p := range peers {
 		id := nodeID("bgp-peer", p.GetNamespace(), p.GetName())
 		addr, _, _ := unstructured.NestedString(p.Object, "spec", "peerAddress")
-		b.addNode(id, p.GetName(), "bgp-peer", p.GetNamespace(), false, addr)
+		b.addNode(id, p.GetName(), "bgp-peer", p.GetNamespace(), false, false, rankForKind("bgp-peer"), addr)
 		b.addPath("ingress", p.GetName(), p.GetNamespace(), "bgp-peer", "discovered", addr)
 	}
 	_, _ = c.DC.list(ctx, gvrIPPool, "metallb-system")
@@ -278,6 +312,13 @@ func (c *Catalog) discoverEgress(ctx context.Context, scope map[string]struct{},
 	if c.DC == nil {
 		return nil
 	}
+	podID := podNodeID(pod)
+	destID := ""
+	for id := range b.destIDs {
+		destID = id
+		break
+	}
+
 	egressIPs, _ := c.DC.list(ctx, gvrEgressIP, "")
 	for _, item := range egressIPs {
 		ns, _, _ := unstructured.NestedString(item.Object, "spec", "namespace")
@@ -288,20 +329,17 @@ func (c *Catalog) discoverEgress(ctx context.Context, scope map[string]struct{},
 		}
 		id := nodeID("egressip", "", item.GetName())
 		statusIP, _, _ := unstructured.NestedString(item.Object, "status", "items", "0", "egressIP")
-		b.addNode(id, item.GetName(), "egressip", ns, false, statusIP)
+		b.addNode(id, item.GetName(), "egressip", ns, false, false, rankForKind("egressip"), statusIP)
 		b.addPath("egress", item.GetName(), ns, "egressip", scopeStatus(ns, scope), statusIP)
-		b.addEdge(b.podID, id, "egress", true, "")
-		if statusIP != "" {
+		b.addEdge(podID, id, "egress", false, "")
+		if destID != "" {
+			b.addEdge(id, destID, "egress", false, "")
+		} else if statusIP != "" {
 			dstID := nodeID("external", "", "dest-egress")
 			if !b.hasNode(dstID) {
-				b.addNode(dstID, "Dest", "external", "", false, "egress path")
+				b.addNode(dstID, "Dest", "external", "", false, false, rankDest, "egress path")
 			}
-			b.addEdge(id, dstID, "egress", true, "")
-		} else if b.nodeID != "" {
-			bondID := nodeID("bond", "", b.target.NodeName+"-bond0")
-			if b.hasNode(bondID) {
-				b.addEdge(bondID, id, "egress", true, "", true)
-			}
+			b.addEdge(id, dstID, "egress", false, "")
 		}
 	}
 
@@ -310,35 +348,30 @@ func (c *Catalog) discoverEgress(ctx context.Context, scope map[string]struct{},
 		for _, item := range ess {
 			id := nodeID("egressservice", ns, item.GetName())
 			ip, _, _ := unstructured.NestedString(item.Object, "status", "assignedIP")
-			b.addNode(id, item.GetName(), "egressservice", ns, false, ip)
+			b.addNode(id, item.GetName(), "egressservice", ns, false, false, rankForKind("egressservice"), ip)
 			b.addPath("egress", item.GetName(), ns, "egressservice", "discovered", ip)
 			if ns == pod.Namespace {
-				b.addEdge(b.podID, id, "egressservice", false, "")
-			} else {
-				b.addPath("egress", item.GetName(), ns, "egressservice", "out_of_scope", ip)
+				b.addEdge(podID, id, "egressservice", false, "")
 			}
 		}
 	}
 
-	egressNets, _ := c.DC.list(ctx, gvrEgressNetwork, "")
-	for _, item := range egressNets {
-		id := nodeID("egress-router", "", item.GetName())
-		b.addNode(id, item.GetName(), "egress-router", "", false, "EgressNetwork")
-		b.addPath("egress", item.GetName(), "", "egress-router", "discovered", "OpenShift egress router")
-	}
-
 	if pod.NodeName != "" {
 		ovnID := nodeID("ovn", pod.Namespace, pod.Name)
-		b.addNode(ovnID, "OVN port", "ovn-logical-port", pod.Namespace, false, "lp_"+pod.Name)
-		b.addEdge(b.podID, ovnID, "direct", true, "")
-		if b.nodeID != "" {
-			b.addEdge(ovnID, b.nodeID, "direct", true, "")
+		b.addNode(ovnID, "OVN port", "ovn-logical-port", pod.Namespace, false, false, rankForKind("ovn-logical-port"), "lp_"+pod.Name)
+		b.addEdge(podID, ovnID, "direct", false, "")
+		nodeIDVal := nodeID("node", "", pod.NodeName)
+		if b.hasNode(nodeIDVal) {
+			b.addEdge(ovnID, nodeIDVal, "direct", false, "")
 		}
 		bondID := nodeID("bond", "", pod.NodeName+"-bond0")
-		b.addNode(bondID, "bond0", "bond", "", false, "eth0+eth1")
+		b.addNode(bondID, "bond0", "bond", "", false, false, rankForKind("bond"), "eth0+eth1")
 		b.addPath("host", "bond0", "", "bond", "discovered", pod.NodeName)
-		if b.nodeID != "" {
-			b.addEdge(b.nodeID, bondID, "host", true, "")
+		if b.hasNode(nodeIDVal) {
+			b.addEdge(nodeIDVal, bondID, "host", false, "")
+		}
+		if destID != "" {
+			b.addEdge(bondID, destID, "egress", false, "")
 		}
 	}
 	return nil
@@ -366,15 +399,16 @@ func (c *Catalog) discoverNADs(ctx context.Context, pod spcgk8s.PodDetail, b *gr
 	if err != nil || ann == "" {
 		return nil
 	}
+	podID := podNodeID(pod)
 	for _, item := range items {
 		if !strings.Contains(ann, item.GetName()) {
 			continue
 		}
 		id := nodeID("nad", pod.Namespace, item.GetName())
 		config, _, _ := unstructured.NestedString(item.Object, "spec", "config")
-		b.addNode(id, item.GetName(), "nad", pod.Namespace, false, truncate(config, 48))
+		b.addNode(id, item.GetName(), "nad", pod.Namespace, false, false, rankForKind("nad"), truncate(config, 48))
 		b.addPath("host", item.GetName(), pod.Namespace, "nad", "discovered", "secondary interface")
-		b.addEdge(b.podID, id, "direct", false, "")
+		b.addEdge(podID, id, "direct", false, "")
 	}
 	return nil
 }
@@ -395,11 +429,12 @@ func (c *Catalog) discoverNetworkPolicies(ctx context.Context, pod spcgk8s.PodDe
 	if err != nil {
 		return nil
 	}
+	podID := podNodeID(pod)
 	for _, np := range policies.Items {
 		id := nodeID("netpol", pod.Namespace, np.Name)
-		b.addNode(id, np.Name, "networkpolicy", pod.Namespace, false, "policy")
+		b.addNode(id, np.Name, "networkpolicy", pod.Namespace, false, false, rankForKind("networkpolicy"), "policy")
 		b.addPath("host", np.Name, pod.Namespace, "networkpolicy", "discovered", "")
-		b.addEdge(id, b.podID, "policy-deny", false, "")
+		b.addEdge(id, podID, "policy-deny", false, "")
 	}
 	return nil
 }
