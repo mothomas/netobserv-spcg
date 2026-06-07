@@ -1,12 +1,17 @@
-export type AppSection = "workspace" | "flow" | "ai";
+import type { AppSection } from "@/lib/sections";
 
 type Props = {
   product: string;
   cluster?: string;
   sessionActive?: boolean;
   captureActive?: boolean;
+  traceActive?: boolean;
+  appTrafficAvailable?: boolean;
+  appTrafficActive?: boolean;
   active?: AppSection;
+  captureAvailable?: boolean;
   flowAvailable?: boolean;
+  traceAvailable?: boolean;
   aiAvailable?: boolean;
   onNavigate?: (section: AppSection) => void;
   onSignOut?: () => void;
@@ -17,8 +22,13 @@ export function Sidebar({
   cluster,
   sessionActive,
   captureActive,
+  traceActive,
+  appTrafficAvailable,
+  appTrafficActive,
   active = "workspace",
+  captureAvailable,
   flowAvailable,
+  traceAvailable,
   aiAvailable,
   onNavigate,
   onSignOut,
@@ -34,17 +44,31 @@ export function Sidebar({
           </div>
         </div>
       </div>
-      <nav className="flex-1 px-3 py-4 space-y-1 text-sm">
-        <NavItem
-          label="Workspace"
-          active={active === "workspace"}
-          onClick={() => onNavigate?.("workspace")}
-        />
+      <nav className="flex-1 px-3 py-4 space-y-1 text-sm" aria-label="Primary">
+        <NavItem label="Workspace" active={active === "workspace"} onClick={() => onNavigate?.("workspace")} />
         <NavItem
           label="Capture"
-          hint={captureActive ? "Live" : "Idle"}
+          active={active === "capture"}
+          hint={captureActive ? "Live" : captureAvailable ? "Ready" : "Scope NS"}
           hintTone={captureActive ? "ok" : "muted"}
-          disabled
+          disabled={!captureAvailable}
+          onClick={() => captureAvailable && onNavigate?.("capture")}
+        />
+        <NavItem
+          label="Packet Trace"
+          active={active === "trace"}
+          hint={traceActive ? "Active" : traceAvailable ? "Ready" : "Setup"}
+          hintTone={traceActive ? "ok" : "muted"}
+          disabled={!traceAvailable}
+          onClick={() => traceAvailable && onNavigate?.("trace")}
+        />
+        <NavItem
+          label="App network"
+          active={active === "apptraffic"}
+          hint={appTrafficActive ? "Live" : appTrafficAvailable ? "Ready" : "Capture first"}
+          hintTone={appTrafficActive ? "ok" : "muted"}
+          disabled={!appTrafficAvailable}
+          onClick={() => appTrafficAvailable && onNavigate?.("apptraffic")}
         />
         <NavItem
           label="Flow graph"
@@ -96,6 +120,7 @@ function NavItem({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={`w-full flex items-center justify-between px-3 py-2 rounded-siem text-left transition ${
         disabled
           ? "opacity-40 cursor-not-allowed"
@@ -132,3 +157,5 @@ function StatusDot({ ok }: { ok?: boolean }) {
     />
   );
 }
+
+export type { AppSection };

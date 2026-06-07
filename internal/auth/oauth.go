@@ -53,21 +53,38 @@ func (o OAuthSettings) Valid() error {
 	return nil
 }
 
+type oauthPending struct {
+	issuedAt    time.Time
+	redirectURI string
+}
+
 type oauthStateStore struct {
 	mu     sync.Mutex
-	states map[string]time.Time
+	states map[string]oauthPending
 	ttl    time.Duration
 }
 
 func newOAuthStateStore() *oauthStateStore {
 	return &oauthStateStore{
-		states: make(map[string]time.Time),
+		states: make(map[string]oauthPending),
 		ttl:    10 * time.Minute,
 	}
 }
 
-// IssueOAuthState creates a CSRF state for the authorization redirect.
-func (s *oauthStateStore) Issue() (string, error) {
+func (s *oauthStateStore) pruneLocked(now time.Time) {
+	for k, p := range s.states {
+		if now.Sub(p.issuedAt) > s.ttl {
+			delete(s.states, k)
+		}
+	}
+}
+
+// IssueRedirect creates CSRF state bound to redirect_uri used at authorize (must match token exchange).
+func (s *oauthStateStore) IssueRedirect(redirectURI string) (string, error) {
+	redirectURI = strings.TrimSpace(redirectURI)
+	if redirectURI == "" {
+		return "", fmt.Errorf("redirect_uri required for oauth state")
+	}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -76,25 +93,24 @@ func (s *oauthStateStore) Issue() (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
-	for k, t := range s.states {
-		if now.Sub(t) > s.ttl {
-			delete(s.states, k)
-		}
-	}
-	s.states[state] = now
+	s.pruneLocked(now)
+	s.states[state] = oauthPending{issuedAt: now, redirectURI: redirectURI}
 	return state, nil
 }
 
-// ConsumeOAuthState validates and burns a CSRF state from the callback.
-func (s *oauthStateStore) Consume(state string) bool {
+// ConsumeRedirect validates state and returns the redirect_uri from authorize.
+func (s *oauthStateStore) ConsumeRedirect(state string) (redirectURI string, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, ok := s.states[state]
-	if !ok {
-		return false
+	p, found := s.states[state]
+	if !found {
+		return "", false
 	}
 	delete(s.states, state)
-	return time.Since(t) <= s.ttl
+	if time.Since(p.issuedAt) > s.ttl {
+		return "", false
+	}
+	return p.redirectURI, true
 }
 
 // OAuthState is a process-wide CSRF store for the authorization code flow.
@@ -194,7 +210,12 @@ func ExchangeCodeForToken(client http.Client, cfg OAuthSettings, code string) (s
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("token endpoint %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		msg := strings.TrimSpace(string(body))
+		if strings.Contains(msg, "unauthorized_client") {
+			return "", fmt.Errorf("token endpoint %s: %s — sync OAuthClient %q secret with secret %s (run openshift-secure-fix-oauth.sh)",
+				resp.Status, msg, cfg.ClientID, "spcg-oauth-client")
+		}
+		return "", fmt.Errorf("token endpoint %s: %s", resp.Status, msg)
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
