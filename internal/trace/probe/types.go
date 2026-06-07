@@ -21,27 +21,32 @@ type FireRequest struct {
 	TraceID   string `json:"trace_id"`
 	Interface string `json:"interface"` // "default" or Multus net name
 	Simulate  bool   `json:"simulate,omitempty"`
+	DemoDrop  bool   `json:"demo_drop,omitempty"`
 }
 
 // FireResponse acknowledges a probe session and paint token.
 type FireResponse struct {
-	ProbeID      string `json:"probe_id"`
-	TraceID      string `json:"trace_id"`
-	PaintToken   string `json:"paint_token"`
-	ICMPID       uint16 `json:"icmp_id"`
-	Interface    string `json:"interface"`
-	Mode         string `json:"mode"` // simulate | live
-	PrimaryEdges int    `json:"primary_edges"`
+	ProbeID       string `json:"probe_id"`
+	TraceID       string `json:"trace_id"`
+	PaintToken    string `json:"paint_token"`
+	ICMPID        uint16 `json:"icmp_id"`
+	Interface     string `json:"interface"`
+	Mode          string `json:"mode"` // simulate | capture | live
+	PrimaryEdges  int    `json:"primary_edges"`
+	CaptureLinked bool   `json:"capture_linked,omitempty"`
 }
 
 // ProbeEvent is streamed to the UI while a probe is active.
 type ProbeEvent struct {
-	Type    string         `json:"type"` // probe_started, edge_update, probe_finished, error
-	TraceID string         `json:"trace_id"`
-	ProbeID string         `json:"probe_id,omitempty"`
-	EdgeID  string         `json:"edge_id,omitempty"`
-	State   EdgePaintState `json:"state,omitempty"`
-	Hook    string         `json:"hook,omitempty"`
-	Seq     int            `json:"seq,omitempty"`
-	Message string         `json:"message,omitempty"`
+	Type       string         `json:"type"` // probe_started, edge_update, probe_finished, error
+	TraceID    string         `json:"trace_id"`
+	ProbeID    string         `json:"probe_id,omitempty"`
+	EdgeID     string         `json:"edge_id,omitempty"`
+	State      EdgePaintState `json:"state,omitempty"`
+	Hook       string         `json:"hook,omitempty"`
+	Seq        int            `json:"seq,omitempty"`
+	Message    string         `json:"message,omitempty"`
+	DropReason string         `json:"drop_reason,omitempty"`
+	Verified   int            `json:"verified,omitempty"`
+	Total      int            `json:"total,omitempty"`
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/netobserv/spcg/internal/capture/sensor"
 	spcgk8s "github.com/netobserv/spcg/internal/k8s"
 	"github.com/netobserv/spcg/internal/pcap"
+	"github.com/netobserv/spcg/internal/trace/probe"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"google.golang.org/grpc"
 	grpcreds "google.golang.org/grpc/credentials"
@@ -522,6 +523,7 @@ func (s *Server) handleCaptureStream(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			sess.AppendFlow(podName, podUID, chunk.GetData(), meta, chunk.GetSequence())
+			probe.ObserveCapturePacket(sess.ID, chunk.GetData(), parseCaptureMeta(meta), chunk.GetSequence())
 			if err := sess.LastS3Error(); err != nil {
 				fmt.Fprintf(w, "event: error\ndata: s3 upload: %v\n\n", err)
 				flusher.Flush()

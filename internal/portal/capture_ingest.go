@@ -10,6 +10,7 @@ import (
 	"github.com/netobserv/spcg/internal/capture/sensor"
 	spcgk8s "github.com/netobserv/spcg/internal/k8s"
 	"github.com/netobserv/spcg/internal/pcap"
+	"github.com/netobserv/spcg/internal/trace/probe"
 	"google.golang.org/grpc"
 )
 
@@ -156,6 +157,7 @@ func (s *Server) runCaptureIngest(ctx context.Context, prep *captureIngestResult
 			}
 		}
 		sess.AppendFlow(podName, podUID, chunk.GetData(), meta, chunk.GetSequence())
+		probe.ObserveCapturePacket(sess.ID, chunk.GetData(), parseCaptureMeta(meta), chunk.GetSequence())
 		if err := sess.LastS3Error(); err != nil {
 			return
 		}
@@ -164,4 +166,15 @@ func (s *Server) runCaptureIngest(ctx context.Context, prep *captureIngestResult
 			return
 		}
 	}
+}
+
+func parseCaptureMeta(raw string) map[string]interface{} {
+	if raw == "" {
+		return nil
+	}
+	var m map[string]interface{}
+	if json.Unmarshal([]byte(raw), &m) != nil {
+		return nil
+	}
+	return m
 }

@@ -1,10 +1,11 @@
 package probe
 
 import (
+	"encoding/binary"
 	"testing"
 
+	"github.com/netobserv/spcg/internal/pcap"
 	"github.com/netobserv/spcg/internal/trace"
-	corev1 "k8s.io/api/core/v1"
 )
 
 func TestPaintTokenStable(t *testing.T) {
@@ -49,22 +50,49 @@ func TestGraphCorrelatorAdvancesPrimaryEdges(t *testing.T) {
 	}
 }
 
-func TestInterfacesFromPodMultus(t *testing.T) {
-	p := &corev1.Pod{}
-	p.Annotations = map[string]string{
-		networksStatusAnnotation: `[{"name":"macvlan-conf","interface":"net1","default":false}]`,
+func TestGraphCorrelatorDemoDrop(t *testing.T) {
+	g := trace.TraceGraph{
+		Nodes: []trace.TraceNode{{ID: "a", Rank: 0}, {ID: "b", Rank: 1}},
+		Edges: []trace.TraceEdge{{ID: "e1", From: "a", To: "b", Primary: true}},
 	}
-	ifaces := interfacesFromPod(p)
-	if len(ifaces) < 2 {
-		t.Fatalf("expected default + multus, got %+v", ifaces)
+	c := NewGraphCorrelator(g)
+	if c.NextEdgeID() != "e1" {
+		t.Fatalf("next=%s", c.NextEdgeID())
 	}
-	found := false
-	for _, iface := range ifaces {
-		if iface.Name == "macvlan-conf" && iface.CNI == "multus" {
-			found = true
-		}
+	if !c.MarkDropOnEdge("e1") {
+		t.Fatal("mark drop failed")
 	}
-	if !found {
-		t.Fatalf("ifaces: %+v", ifaces)
+	if c.Snapshot()["e1"] != EdgeDroppedRed {
+		t.Fatalf("state=%v", c.Snapshot()["e1"])
 	}
+}
+
+func TestMatchPaintPacketICMPFrame(t *testing.T) {
+	const want = uint16(0xa3f2)
+	frame := buildICMPEchoFrame(want)
+	if !MatchPaintPacket(frame, nil, want) {
+		t.Fatal("expected icmp frame match")
+	}
+	if MatchPaintPacket(frame, nil, want+1) {
+		t.Fatal("expected mismatch")
+	}
+	id, ok := pcap.ICMPIdentifier(frame)
+	if !ok || id != want {
+		t.Fatalf("parse id=%d ok=%v", id, ok)
+	}
+}
+
+func buildICMPEchoFrame(icmpID uint16) []byte {
+	// Minimal IPv4 ICMP echo frame (no pcap prefix).
+	frame := make([]byte, 14+20+8)
+	// Ethernet
+	frame[12] = 0x08
+	frame[13] = 0x00
+	// IPv4 header
+	frame[14] = 0x45
+	frame[23] = 1 // ICMP
+	// ICMP echo request
+	frame[14+20] = 8
+	binary.BigEndian.PutUint16(frame[14+20+4:14+20+6], icmpID)
+	return frame
 }

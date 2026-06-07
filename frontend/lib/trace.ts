@@ -280,8 +280,9 @@ export type ProbeFireResponse = {
   paint_token: string;
   icmp_id: number;
   interface: string;
-  mode: "simulate" | "live" | string;
+  mode: "simulate" | "capture" | "live" | string;
   primary_edges: number;
+  capture_linked?: boolean;
 };
 
 export type ProbeEvent = {
@@ -293,6 +294,9 @@ export type ProbeEvent = {
   hook?: string;
   seq?: number;
   message?: string;
+  drop_reason?: string;
+  verified?: number;
+  total?: number;
   edge_states?: Record<string, EdgePaintState>;
 };
 
@@ -315,13 +319,17 @@ export async function fetchProbeInterfaces(
 export async function fireTraceProbe(
   authSessionId: string,
   traceId: string,
-  iface: string,
-  simulate = false
+  opts: { interface: string; simulate?: boolean; demoDrop?: boolean }
 ): Promise<ProbeFireResponse> {
   const res = await apiFetch("/api/v1/trace/probe/fire", {
     method: "POST",
     headers: authHeaders(authSessionId),
-    body: JSON.stringify({ trace_id: traceId, interface: iface, simulate }),
+    body: JSON.stringify({
+      trace_id: traceId,
+      interface: opts.interface,
+      simulate: opts.simulate ?? false,
+      demo_drop: opts.demoDrop ?? false,
+    }),
   });
   if (!res.ok) {
     const text = await res.text();

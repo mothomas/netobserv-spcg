@@ -81,7 +81,8 @@ func (s *Server) handleTraceProbeFire(w http.ResponseWriter, r *http.Request) {
 	if csWrap != nil {
 		cs = csWrap.Interface
 	}
-	resp, err := probe.Fire(r.Context(), cs, cfg, sess.Response, req)
+	captureID := traceCaptureSessionID(req.TraceID)
+	resp, err := probe.Fire(r.Context(), cs, cfg, sess.Response, req, captureID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

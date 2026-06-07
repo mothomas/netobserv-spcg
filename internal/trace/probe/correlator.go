@@ -62,6 +62,71 @@ func (c *GraphCorrelator) Advance(hook string) (edgeID string, ok bool) {
 }
 
 // MarkDrop paints the last active or final edge as dropped.
+// MarkDropOnEdge paints a specific edge as dropped.
+func (c *GraphCorrelator) MarkDropOnEdge(edgeID string) bool {
+	if c == nil || edgeID == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.edgeStates[edgeID]; !ok {
+		return false
+	}
+	c.edgeStates[edgeID] = EdgeDroppedRed
+	for i, e := range c.edges {
+		if e.ID == edgeID {
+			if c.seq <= i {
+				c.seq = i + 1
+			}
+			break
+		}
+	}
+	return true
+}
+
+// Remaining returns primary edges not yet advanced.
+func (c *GraphCorrelator) Remaining() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.seq >= len(c.edges) {
+		return 0
+	}
+	return len(c.edges) - c.seq
+}
+
+// NextEdgeID returns the next primary edge id without advancing.
+func (c *GraphCorrelator) NextEdgeID() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.seq >= len(c.edges) {
+		return ""
+	}
+	return c.edges[c.seq].ID
+}
+
+// VerifiedCount returns the number of primary edges painted active or dropped.
+func (c *GraphCorrelator) VerifiedCount() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	n := 0
+	for _, e := range c.edges {
+		st := c.edgeStates[e.ID]
+		if st == EdgeActiveGreen || st == EdgeDroppedRed {
+			n++
+		}
+	}
+	return n
+}
+
 func (c *GraphCorrelator) MarkDrop() string {
 	if c == nil {
 		return ""

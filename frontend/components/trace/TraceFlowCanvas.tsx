@@ -222,8 +222,22 @@ export function TraceFlowCanvas({ graph, animate = true, edgeStates }: Props) {
                 pathD={pathForEdge(e)}
                 color="var(--siem-ok)"
                 outline="var(--siem-graph-bg)"
-                dur={1.8}
-                delay={i * 0.12}
+                dur={1.4}
+                delay={i * 0.08}
+              />
+            ))}
+          {graph.edges
+            .filter((e) => edgeStates?.[e.id] === "DROPPED_RED")
+            .map((e) => (
+              <FlowPacket
+                key={`drop-${e.id}`}
+                pathD={pathForEdge(e)}
+                color="var(--siem-ok)"
+                dropColor="var(--siem-err)"
+                outline="var(--siem-graph-bg)"
+                dur={2.2}
+                delay={0.2}
+                frozen
               />
             ))}
           {animate && dropEdge && (
@@ -292,6 +306,7 @@ export function TraceFlowCanvas({ graph, animate = true, edgeStates }: Props) {
         <LegendSwatch color="rgba(96, 205, 255, 0.75)" label="Ingress paths (into workload)" />
         <LegendSwatch color="rgba(52, 211, 153, 0.65)" label="Egress paths (to destination)" />
         <LegendSwatch color="var(--siem-border-hi)" label="Context (dimmed)" dashed />
+        <LegendSwatch color="var(--siem-err)" label="Blocked hop (policy drop)" dashed />
         <LegendSwatch color="var(--siem-ok)" label="Verified hop (probe paint)" square />
         <LegendSwatch color="var(--siem-ok)" label="Live packet on focused hop" square />
       </div>

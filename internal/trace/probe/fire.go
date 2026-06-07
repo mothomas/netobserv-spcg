@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	spcgk8s "github.com/netobserv/spcg/internal/k8s"
@@ -74,7 +73,7 @@ func interfacesFromPod(p *corev1.Pod) []AttachInterface {
 }
 
 // Fire starts a painted probe and paints primary edges as observations arrive.
-func Fire(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config, resp trace.DiscoverResponse, req FireRequest) (*FireResponse, error) {
+func Fire(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config, resp trace.DiscoverResponse, req FireRequest, captureSessionID string) (*FireResponse, error) {
 	if resp.TraceID == "" {
 		return nil, fmt.Errorf("trace_id is required")
 	}
@@ -89,55 +88,76 @@ func Fire(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config, resp t
 	probeID := uuid.NewString()
 	child, cancel := context.WithCancel(ctx)
 	s := &session{
-		traceID: resp.TraceID,
-		probeID: probeID,
-		corr:    corr,
-		cancel:  cancel,
+		traceID:          resp.TraceID,
+		probeID:          probeID,
+		corr:             corr,
+		cancel:           cancel,
+		captureSessionID: strings.TrimSpace(captureSessionID),
+		icmpID:           icmpID,
+		demoDrop:         req.DemoDrop,
+		simulate:         req.Simulate,
+		obsNotify:        make(chan struct{}, 8),
 	}
 	sessMu.Lock()
 	sessions[resp.TraceID] = s
 	sessMu.Unlock()
 
 	mode := "live"
-	if req.Simulate || simulateDefault() || cs == nil {
+	captureLinked := false
+	switch {
+	case req.Simulate || simulateDefault():
 		mode = "simulate"
+	case s.captureSessionID != "":
+		mode = "capture"
+		captureLinked = true
+		LinkCaptureSession(s.captureSessionID, resp.TraceID, icmpID)
+	case cs == nil:
+		mode = "simulate"
+		s.simulate = true
 	}
 
 	out := &FireResponse{
-		ProbeID:      probeID,
-		TraceID:      resp.TraceID,
-		PaintToken:   token,
-		ICMPID:       icmpID,
-		Interface:    iface,
-		Mode:         mode,
-		PrimaryEdges: corr.PrimaryCount(),
+		ProbeID:       probeID,
+		TraceID:       resp.TraceID,
+		PaintToken:    token,
+		ICMPID:        icmpID,
+		Interface:     iface,
+		Mode:          mode,
+		PrimaryEdges:  corr.PrimaryCount(),
+		CaptureLinked: captureLinked,
 	}
 
 	s.broadcast(ProbeEvent{
-		Type:    "probe_started",
-		TraceID: resp.TraceID,
-		ProbeID: probeID,
-		Message: fmt.Sprintf("paint %s via %s (%s)", token, iface, mode),
+		Type:     "probe_started",
+		TraceID:  resp.TraceID,
+		ProbeID:  probeID,
+		Message:  fmt.Sprintf("verify %s via %s (%s)", token, iface, mode),
+		Total:    corr.PrimaryCount(),
+		Verified: 0,
 	})
 
 	go func() {
 		defer stopSession(resp.TraceID)
-		if mode == "simulate" {
-			runSimulatedPaint(child, s, corr)
-			return
+		switch mode {
+		case "simulate":
+			runSimulatedPaint(child, s)
+		case "capture":
+			if destIP, err := resolveDestIP(resp); err == nil {
+				go execProbePing(child, cfg, cs, resp.TargetPod, iface, destIP)
+			}
+			runCapturePaintLoop(child, s)
+		default:
+			destIP, err := resolveDestIP(resp)
+			if err != nil {
+				s.broadcast(ProbeEvent{Type: "error", TraceID: resp.TraceID, ProbeID: probeID, Message: err.Error()})
+				runSimulatedPaint(child, s)
+				return
+			}
+			if err := execProbePing(child, cfg, cs, resp.TargetPod, iface, destIP); err != nil {
+				s.broadcast(ProbeEvent{Type: "error", TraceID: resp.TraceID, ProbeID: probeID, Message: err.Error()})
+			}
+			runSimulatedPaint(child, s)
 		}
-		destIP, err := resolveDestIP(resp)
-		if err != nil {
-			s.broadcast(ProbeEvent{Type: "error", TraceID: resp.TraceID, ProbeID: probeID, Message: err.Error()})
-			return
-		}
-		if err := execProbePing(child, cfg, cs, resp.TargetPod, iface, destIP); err != nil {
-			s.broadcast(ProbeEvent{Type: "error", TraceID: resp.TraceID, ProbeID: probeID, Message: err.Error()})
-			// Fall back to simulated paint so the UX still demonstrates path correlation.
-			runSimulatedPaint(child, s, corr)
-			return
-		}
-		runSimulatedPaint(child, s, corr)
 	}()
 
 	return out, nil
@@ -160,48 +180,7 @@ func resolveDestIP(resp trace.DiscoverResponse) (string, error) {
 	if len(resp.DestPods) > 0 && resp.DestPods[0].PodIP != "" {
 		return resp.DestPods[0].PodIP, nil
 	}
-	if dest.Mode == "namespace" && len(resp.SourcePods) > 0 {
-		// Same-namespace service trace: ping cluster DNS or first dest pod if known.
-		return "", fmt.Errorf("select a destination IP or resolve destination pods for live probe")
-	}
 	return "", fmt.Errorf("could not resolve destination IP")
-}
-
-func runSimulatedPaint(ctx context.Context, s *session, corr *GraphCorrelator) {
-	hooks := []string{"veth_egress", "ovs_vport_receive", "ovs_execute_actions", "physical_egress"}
-	seq := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		edgeID, ok := corr.Advance(hooks[seq%len(hooks)])
-		if !ok {
-			s.broadcast(ProbeEvent{
-				Type:    "probe_finished",
-				TraceID: s.traceID,
-				ProbeID: s.probeID,
-				Message: "all primary hops painted",
-			})
-			return
-		}
-		seq++
-		s.broadcast(ProbeEvent{
-			Type:    "edge_update",
-			TraceID: s.traceID,
-			ProbeID: s.probeID,
-			EdgeID:  edgeID,
-			State:   EdgeActiveGreen,
-			Hook:    hooks[(seq-1)%len(hooks)],
-			Seq:     seq,
-		})
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(420 * time.Millisecond):
-		}
-	}
 }
 
 func execProbePing(ctx context.Context, cfg *rest.Config, cs kubernetes.Interface, pod spcgk8s.PodDetail, iface, destIP string) error {

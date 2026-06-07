@@ -71,6 +71,8 @@ export function TraceWorkbench({
   const [filter, setFilter] = useState(DEFAULT_TRACE_FILTER);
   const [edgeStates, setEdgeStates] = useState<Record<string, EdgePaintState>>({});
   const [probeActive, setProbeActive] = useState(false);
+  const [verifiedHops, setVerifiedHops] = useState(0);
+  const [totalHops, setTotalHops] = useState(0);
   const displayGraph = useMemo(() => filterTraceGraph(graph, filter), [graph, filter]);
   const visibleIds = useMemo(() => new Set(displayGraph.nodes.map((n) => n.id)), [displayGraph]);
   const displaySigma = useMemo(() => filterSigmaGraph(sigmaGraph, visibleIds), [sigmaGraph, visibleIds]);
@@ -79,6 +81,21 @@ export function TraceWorkbench({
   const ingress = paths.filter((p: PathSummary) => p.direction === "ingress");
   const egress = paths.filter((p: PathSummary) => p.direction === "egress");
   const host = paths.filter((p: PathSummary) => p.direction === "host");
+
+  const headerBadge =
+    probeActive ? (
+      <span className="text-[10px] px-2 py-0.5 rounded-md text-siem-accent border border-siem-accent/40 shrink-0 animate-pulse">
+        verifying
+      </span>
+    ) : verifiedHops > 0 && totalHops > 0 && verifiedHops >= totalHops ? (
+      <span className="text-[10px] px-2 py-0.5 rounded-md text-siem-ok border border-siem-ok/30 shrink-0">verified</span>
+    ) : verifiedHops > 0 ? (
+      <span className="text-[10px] px-2 py-0.5 rounded-md text-siem-warn border border-siem-warn/30 shrink-0">
+        partial · {verifiedHops}/{totalHops}
+      </span>
+    ) : (
+      <span className="text-[10px] px-2 py-0.5 rounded-md text-siem-ok border border-siem-ok/30 shrink-0">discovery</span>
+    );
 
   return (
     <section
@@ -98,21 +115,26 @@ export function TraceWorkbench({
             {` · trace ${traceId.slice(0, 8)}…`}
           </p>
         </div>
-        <span className="text-[10px] px-2 py-0.5 rounded-md text-siem-ok border border-siem-ok/30 shrink-0">
-          discovery
-        </span>
+        {headerBadge}
       </header>
 
-      <TraceStatsBar graph={graph} />
-
-      <div className="px-5 py-3 border-b border-siem-border bg-siem-panel/30 space-y-3">
-        <TraceGraphFilters value={filter} stats={graph.stats} onChange={setFilter} />
+      <div className="px-5 py-4 border-b border-siem-border bg-siem-panel/20">
         <TraceProbePanel
           authSessionId={authSessionId}
           traceId={traceId}
           onEdgeStates={setEdgeStates}
           onProbingChange={setProbeActive}
+          onVerifiedChange={(v, t) => {
+            setVerifiedHops(v);
+            setTotalHops(t);
+          }}
         />
+      </div>
+
+      <TraceStatsBar graph={graph} />
+
+      <div className="px-5 py-3 border-b border-siem-border bg-siem-panel/30">
+        <TraceGraphFilters value={filter} stats={graph.stats} onChange={setFilter} />
       </div>
 
       <div className="relative fluent-graph-stage overflow-hidden flex-1 min-h-[560px]">
@@ -147,9 +169,9 @@ export function TraceWorkbench({
         <div className="p-4 border-l-4 border-siem-border md:border-l-0 md:border-t-0 border-l-siem-accent/40 bg-siem-panel/20">
           <LayerScopeBanner layer={LAYER_SCOPES.trace} compact />
           <p className="text-sm text-siem-muted mt-3">
-            Discovery maps predicted hops. Use <strong className="text-siem-text font-medium">Probe paint</strong> to
-            mark a test packet and correlate live observations onto primary edges, or use{" "}
-            <strong className="text-siem-text font-medium">Capture</strong> for PCAP within a namespace boundary.
+            Run discovery, then <strong className="text-siem-text font-medium">Verify path</strong> to paint primary hops
+            from a marked probe. Enable <strong className="text-siem-text font-medium">Demo policy block</strong> to show a
+            red drop on the final hop for security audiences.
           </p>
         </div>
       </div>
