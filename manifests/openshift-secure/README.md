@@ -71,8 +71,8 @@ Parameterize namespaces and client name via `.Values.oauth.*`.
 
 | Component | Tag |
 |-----------|-----|
-| frontend | `quay.io/moby/spcg-frontend:tracer-20260607` |
-| portal | `quay.io/moby/spcg-ui-portal:tracer-20260607` |
+| frontend | `quay.io/moby/spcg-frontend:probe-20260607` |
+| portal | `quay.io/moby/spcg-ui-portal:probe-20260607` |
 | engine | `quay.io/moby/spcg-backend-engine:small-20260614` |
 
 Rotate Neo4j/graph defaults in `control/secrets.yaml` before production.
