@@ -69,10 +69,7 @@ func (c *Catalog) Resolve(ctx context.Context, req DiscoverRequest) (*DiscoverRe
 		for k, v := range hits {
 			allSvcHits[k] = v
 		}
-		if err := c.discoverNADs(ctx, pod, builder); err != nil {
-			return nil, err
-		}
-		_ = c.discoverNetworkPolicies(ctx, pod, builder)
+		_ = c.discoverNADs(ctx, pod, builder)
 	}
 	for _, pod := range dst.Pods {
 		hits, err := c.discoverServices(ctx, pod, scope, builder)
@@ -82,9 +79,7 @@ func (c *Catalog) Resolve(ctx context.Context, req DiscoverRequest) (*DiscoverRe
 		for k, v := range hits {
 			allSvcHits[k] = v
 		}
-		_ = c.discoverNetworkPolicies(ctx, pod, builder)
 	}
-
 	if len(src.Pods) > 0 {
 		if err := c.discoverRoutes(ctx, src.Pods[0].Namespace, allSvcHits, builder); err != nil {
 			return nil, err
@@ -260,51 +255,6 @@ func (c *Catalog) discoverRoutes(ctx context.Context, podNS string, services map
 		}
 		b.addEdge(extID, id, "ingress", false, "")
 	}
-	return nil
-}
-
-func (c *Catalog) discoverMetalLB(ctx context.Context, services map[string]corev1.Service, b *graphBuilder) error {
-	if c.DC == nil {
-		return nil
-	}
-	for _, svc := range services {
-		if svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
-			continue
-		}
-		vip := ""
-		for _, ing := range svc.Status.LoadBalancer.Ingress {
-			if ing.IP != "" {
-				vip = ing.IP
-				break
-			}
-		}
-		if vip == "" {
-			continue
-		}
-		lbID := nodeID("loadbalancer", svc.Namespace, svc.Name+"-vip")
-		b.addNode(lbID, vip, "loadbalancer-external", svc.Namespace, false, false, rankForKind("loadbalancer-external"), "MetalLB VIP")
-		b.addPath("ingress", vip, svc.Namespace, "metallb-pool", "discovered", svc.Name)
-		svcID := nodeID("service", svc.Namespace, svc.Name)
-		b.addEdge(lbID, svcID, "direct", false, "")
-
-		extID := nodeID("external", "", "client-lb")
-		if !b.hasNode(extID) {
-			b.addNode(extID, "Client", "external-client", "", false, false, rankForKind("external-client"), "via LB")
-		}
-		b.addEdge(extID, lbID, "ingress", false, "")
-	}
-
-	peers, err := c.DC.list(ctx, gvrBGPPeer, "metallb-system")
-	if err != nil {
-		peers, _ = c.DC.list(ctx, gvrBGPPeer, "")
-	}
-	for _, p := range peers {
-		id := nodeID("bgp-peer", p.GetNamespace(), p.GetName())
-		addr, _, _ := unstructured.NestedString(p.Object, "spec", "peerAddress")
-		b.addNode(id, p.GetName(), "bgp-peer", p.GetNamespace(), false, false, rankForKind("bgp-peer"), addr)
-		b.addPath("ingress", p.GetName(), p.GetNamespace(), "bgp-peer", "discovered", addr)
-	}
-	_, _ = c.DC.list(ctx, gvrIPPool, "metallb-system")
 	return nil
 }
 

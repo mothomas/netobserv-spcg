@@ -62,17 +62,20 @@ func TestCatalogResolveServiceAndPod(t *testing.T) {
 	if out.TargetPod.Name != "curl-1" {
 		t.Fatalf("target pod: %+v", out.TargetPod)
 	}
-	if len(out.Graph.Nodes) < 3 {
-		t.Fatalf("expected pod+service+node nodes, got %d", len(out.Graph.Nodes))
+	if len(out.Graph.Nodes) < 2 {
+		t.Fatalf("expected focused path nodes (source + destination), got %d", len(out.Graph.Nodes))
 	}
-	foundSvc := false
+	foundPod := false
 	for _, n := range out.Graph.Nodes {
-		if n.Kind == "service-clusterip" && n.Label == "api" {
-			foundSvc = true
+		if n.Kind == "pod" && n.Label == "curl-1" {
+			foundPod = true
 		}
 	}
-	if !foundSvc {
-		t.Fatalf("service node missing: %+v", out.Graph.Nodes)
+	if !foundPod {
+		t.Fatalf("source pod missing: %+v", out.Graph.Nodes)
+	}
+	if out.Graph.Stats == nil || out.Graph.Stats.PrunedNodes < 0 {
+		t.Fatalf("expected graph stats: %+v", out.Graph.Stats)
 	}
 }
 

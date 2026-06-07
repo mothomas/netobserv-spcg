@@ -100,7 +100,7 @@ func traceNodeColors(kind string, tracked bool) (color, border string) {
 		return "#7c3aed", "#6d28d9"
 	case "egress-router":
 		return "#c2410c", "#9a3412"
-	case "loadbalancer-external", "metallb-pool", "bgp-peer":
+	case "loadbalancer-external", "metallb-pool", "bgp-peer", "metallb-advertisement":
 		return "#14b8a6", "#0d9488"
 	case "external-client", "external":
 		return "#ef4444", "#dc2626"

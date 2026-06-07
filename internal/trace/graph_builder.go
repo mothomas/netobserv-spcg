@@ -152,17 +152,23 @@ func (b *graphBuilder) addPath(direction, resource, ns, kind, status, detail str
 
 func (b *graphBuilder) finish(traceID string) TraceGraph {
 	markFocusPath(b)
-	g, lanes := applyLayout(b.nodes)
-	g.Edges = b.edges
-	g.Paths = b.paths
-	g.TraceID = traceID
-	g.Lanes = lanes
+	for i := range b.nodes {
+		if b.nodes[i].Layer == "" {
+			b.nodes[i].Layer = layerForKind(b.nodes[i].Kind)
+		}
+	}
 	ns := make([]string, 0, len(b.scope))
 	for n := range b.scope {
 		ns = append(ns, n)
 	}
-	g.Namespaces = ns
-	return g
+	g := TraceGraph{
+		Nodes:      b.nodes,
+		Edges:      b.edges,
+		Paths:      b.paths,
+		TraceID:    traceID,
+		Namespaces: ns,
+	}
+	return simplifyGraph(g)
 }
 
 func nodeID(kind, ns, name string) string {

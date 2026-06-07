@@ -27,6 +27,11 @@ func NewDynamicClient(cfg *rest.Config) (*DynamicClient, error) {
 	return &DynamicClient{client: dc}, nil
 }
 
+// List returns unstructured CRD objects for the given GVR (cluster- or namespace-scoped).
+func (d *DynamicClient) List(ctx context.Context, gvr schema.GroupVersionResource, ns string) ([]unstructured.Unstructured, error) {
+	return d.list(ctx, gvr, ns)
+}
+
 func (d *DynamicClient) list(ctx context.Context, gvr schema.GroupVersionResource, ns string) ([]unstructured.Unstructured, error) {
 	if d == nil || d.client == nil {
 		return nil, nil

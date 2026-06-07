@@ -13,6 +13,7 @@ import (
 	graphdb "github.com/netobserv/spcg/internal/graph/neo4j"
 	spcgk8s "github.com/netobserv/spcg/internal/k8s"
 	"github.com/netobserv/spcg/internal/trace"
+	"github.com/netobserv/spcg/internal/trace/probe"
 	"k8s.io/client-go/rest"
 )
 
@@ -21,7 +22,9 @@ func (s *Server) registerTraceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/trace/start", s.handleTraceStart)
 	mux.HandleFunc("/api/v1/trace/graph", s.handleTraceGraph)
 	mux.HandleFunc("/api/v1/trace/teardown/", s.handleTraceTeardown)
+	s.registerTracePathRoute(mux)
 	s.registerTraceCaptureRoutes(mux)
+	s.registerTraceProbeRoutes(mux)
 }
 
 func (s *Server) handleTraceDiscover(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +139,7 @@ func (s *Server) handleTraceTeardown(w http.ResponseWriter, r *http.Request) {
 	if captureID != "" {
 		teardownCaptureSession(captureID)
 	}
+	probe.StopTraceProbe(traceID)
 	deleteTraceSession(traceID)
 	if s.Graph != nil && s.Graph.Enabled() {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -193,6 +197,7 @@ func (s *Server) requireTraceAccess(w http.ResponseWriter, r *http.Request, trac
 var (
 	errTraceNamespaces = &traceError{"namespaces are required"}
 	errTraceSource     = &traceError{"source endpoint is required"}
+	errTraceDest       = &traceError{"destination endpoint is required"}
 )
 
 type traceError struct{ msg string }

@@ -1,7 +1,9 @@
 import type { CaptureSelection, PodDetail } from "@/lib/api";
 import { apiFetch, authHeaders } from "@/lib/api";
+import { apiUrl } from "@/lib/apiBase";
 import type { SigmaGraph } from "@/lib/graph";
 import { normalizeSigmaGraph } from "@/lib/graph";
+export { syncAppUrl } from "@/lib/sections";
 
 export type TraceEndpoint = {
   mode: "ip" | "namespace";
@@ -20,8 +22,10 @@ export type TraceNode = {
   id: string;
   label: string;
   kind: string;
+  layer?: "logical" | "physical" | string;
   namespace?: string;
   rank: number;
+  track?: "ingress" | "egress" | "anchor" | "shared" | "context" | string;
   x: number;
   y: number;
   width: number;
@@ -56,6 +60,9 @@ export type TraceLane = {
   rank: number;
   x: number;
   width: number;
+  y?: number;
+  height?: number;
+  track?: string;
 };
 
 export type TraceGraph = {
@@ -67,6 +74,13 @@ export type TraceGraph = {
   lanes?: TraceLane[];
   width: number;
   height: number;
+  stats?: {
+    total_nodes?: number;
+    focused_nodes?: number;
+    logical_nodes?: number;
+    physical_nodes?: number;
+    pruned_nodes?: number;
+  };
 };
 
 export type TraceStartResponse = {
@@ -111,27 +125,6 @@ export function endpointLabel(ep: TraceEndpoint): string {
   }
   if (ep.pod_name) return `${ep.namespace}/${ep.pod_name}`;
   return ep.namespace || "namespace";
-}
-
-export function syncAppUrl(
-  section: "workspace" | "flow" | "trace" | "microservices" | "ai",
-  traceId?: string | null
-): void {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  if (section === "workspace") {
-    url.searchParams.delete("section");
-    url.searchParams.delete("trace_id");
-  } else {
-    url.searchParams.set("section", section);
-    if ((section === "trace" || section === "microservices") && traceId) {
-      url.searchParams.set("trace_id", traceId);
-    } else {
-      url.searchParams.delete("trace_id");
-    }
-  }
-  const qs = url.searchParams.toString();
-  window.history.replaceState({}, "", qs ? `${url.pathname}?${qs}` : url.pathname);
 }
 
 export async function startTrace(
@@ -271,4 +264,106 @@ export function validateTraceEndpoints(source: TraceEndpoint, dest: TraceEndpoin
     return "Enter a destination IP or choose External.";
   }
   return null;
+}
+
+export type EdgePaintState = "THEORY_ONLY" | "ACTIVE_GREEN" | "DROPPED_RED";
+
+export type ProbeAttachInterface = {
+  name: string;
+  primary: boolean;
+  cni?: string;
+};
+
+export type ProbeFireResponse = {
+  probe_id: string;
+  trace_id: string;
+  paint_token: string;
+  icmp_id: number;
+  interface: string;
+  mode: "simulate" | "live" | string;
+  primary_edges: number;
+};
+
+export type ProbeEvent = {
+  type: "probe_started" | "edge_update" | "probe_finished" | "error" | "snapshot" | string;
+  trace_id: string;
+  probe_id?: string;
+  edge_id?: string;
+  state?: EdgePaintState;
+  hook?: string;
+  seq?: number;
+  message?: string;
+  edge_states?: Record<string, EdgePaintState>;
+};
+
+export async function fetchProbeInterfaces(
+  authSessionId: string,
+  traceId: string
+): Promise<ProbeAttachInterface[]> {
+  const res = await apiFetch(
+    `/api/v1/trace/probe/interfaces?trace_id=${encodeURIComponent(traceId)}`,
+    { method: "GET", headers: authHeaders(authSessionId) }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `probe interfaces failed (${res.status})`);
+  }
+  const data = (await res.json()) as { interfaces?: ProbeAttachInterface[] };
+  return data.interfaces ?? [];
+}
+
+export async function fireTraceProbe(
+  authSessionId: string,
+  traceId: string,
+  iface: string,
+  simulate = false
+): Promise<ProbeFireResponse> {
+  const res = await apiFetch("/api/v1/trace/probe/fire", {
+    method: "POST",
+    headers: authHeaders(authSessionId),
+    body: JSON.stringify({ trace_id: traceId, interface: iface, simulate }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `probe fire failed (${res.status})`);
+  }
+  return (await res.json()) as ProbeFireResponse;
+}
+
+export async function streamTraceProbeEvents(
+  authSessionId: string,
+  traceId: string,
+  onEvent: (ev: ProbeEvent) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const res = await fetch(
+    apiUrl(`/api/v1/trace/probe/events?trace_id=${encodeURIComponent(traceId)}`),
+    { method: "GET", headers: authHeaders(authSessionId), signal }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `probe events failed (${res.status})`);
+  }
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("probe event stream unavailable");
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() || "";
+    for (const block of parts) {
+      if (!block.trim()) continue;
+      const dataLine = block.split("\n").find((l) => l.startsWith("data:"));
+      if (!dataLine) continue;
+      const data = dataLine.replace(/^data:\s*/, "");
+      try {
+        onEvent(JSON.parse(data) as ProbeEvent);
+      } catch {
+        /* ignore malformed frames */
+      }
+    }
+  }
 }

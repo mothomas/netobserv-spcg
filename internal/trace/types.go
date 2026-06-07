@@ -17,8 +17,10 @@ type TraceNode struct {
 	ID        string  `json:"id"`
 	Label     string  `json:"label"`
 	Kind      string  `json:"kind"`
+	Layer     string  `json:"layer,omitempty"` // logical | physical
 	Namespace string  `json:"namespace,omitempty"`
 	Rank      int     `json:"rank"`
+	Track     string  `json:"track,omitempty"` // ingress | egress | anchor | shared | context
 	X         float64 `json:"x"`
 	Y         float64 `json:"y"`
 	Width     float64 `json:"width"`
@@ -60,14 +62,27 @@ type TraceGraph struct {
 	Lanes      []TraceLane   `json:"lanes,omitempty"`
 	Width      float64       `json:"width"`
 	Height     float64       `json:"height"`
+	Stats      *TraceGraphStats `json:"stats,omitempty"`
 }
 
-// TraceLane labels a ranked column in the cop timeline.
+// TraceGraphStats summarizes discovery for UI filters.
+type TraceGraphStats struct {
+	TotalNodes     int `json:"total_nodes"`
+	FocusedNodes   int `json:"focused_nodes"`
+	LogicalNodes   int `json:"logical_nodes"`
+	PhysicalNodes  int `json:"physical_nodes"`
+	PrunedNodes    int `json:"pruned_nodes"`
+}
+
+// TraceLane labels a swimlane band or ranked column in the path map.
 type TraceLane struct {
-	Label string  `json:"label"`
-	Rank  int     `json:"rank"`
-	X     float64 `json:"x"`
-	Width float64 `json:"width"`
+	Label  string  `json:"label"`
+	Rank   int     `json:"rank"`
+	X      float64 `json:"x"`
+	Width  float64 `json:"width"`
+	Y      float64 `json:"y,omitempty"`
+	Height float64 `json:"height,omitempty"`
+	Track  string  `json:"track,omitempty"`
 }
 
 // DiscoverRequest defines source→destination trace targets (namespace-scoped).

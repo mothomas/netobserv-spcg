@@ -3,16 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AIDiagnosticModal } from "@/components/AIDiagnosticModal";
 import { ObservabilityWorkbench } from "@/components/ObservabilityWorkbench";
-import { MicroserviceAnalysisWorkbench } from "@/components/microservices/MicroserviceAnalysisWorkbench";
+import { ApplicationNetworkWorkbench } from "@/components/apptraffic/ApplicationNetworkWorkbench";
 import { TraceEndpointSelector } from "@/components/trace/TraceEndpointSelector";
 import { TraceWorkbench, type TraceView } from "@/components/trace/TraceWorkbench";
 import { S3CapturePanel, type CaptureTierLimits } from "@/components/S3CapturePanel";
 import { AppShell } from "@/components/layout/AppShell";
+import { LayerScopeBanner } from "@/components/layout/LayerScopeBanner";
 import { SectionEmptyState } from "@/components/layout/SectionEmptyState";
 import { Sidebar, type AppSection } from "@/components/layout/Sidebar";
 import { ViewSegment } from "@/components/layout/ViewSegment";
 import { type CaptureSummary, type FlowTopology } from "@/lib/ai";
+import { buildCaptureScopeLabel, captureScopeSummary } from "@/lib/captureScope";
 import { emptyTopology, normalizeTopology } from "@/lib/topology";
+import { LAYER_SCOPES, syncAppUrl } from "@/lib/sections";
 import { fetchGraphTopology, normalizeSigmaGraph, type SigmaGraph } from "@/lib/graph";
 import { isKubeconfigAuthMode, isOpenShiftAuthMode } from "@/lib/authMode";
 import {
@@ -51,12 +54,8 @@ import {
   defaultSourceEndpoint,
   endpointLabel,
   fetchTraceGraph,
-  fetchTraceStatus,
   sourceEndpointFromSelection,
   startTrace,
-  startTraceCapture,
-  stopTraceCapture,
-  syncAppUrl,
   teardownTrace,
   validateTraceEndpoints,
   type TraceEndpoint,
@@ -121,10 +120,8 @@ export default function Home() {
   const [traceDest, setTraceDest] = useState<TraceEndpoint>(defaultDestEndpoint());
   const [traceSourcePods, setTraceSourcePods] = useState<PodDetail[]>([]);
   const [traceDestPods, setTraceDestPods] = useState<PodDetail[]>([]);
-  const [traceView, setTraceView] = useState<TraceView>("cop");
+  const [traceView, setTraceView] = useState<TraceView>("sigma");
   const [tracePaused, setTracePaused] = useState(false);
-  const [traceCaptureActive, setTraceCaptureActive] = useState(false);
-  const [traceCaptureBusy, setTraceCaptureBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [s3Config, setS3Config] = useState<S3CaptureConfig>({
     enabled: false,
@@ -149,7 +146,7 @@ export default function Home() {
         return;
       }
       setShowAI(false);
-      syncAppUrl(section, section === "trace" || section === "microservices" ? traceId : null);
+      syncAppUrl(section, section === "trace" ? traceId : null);
     },
     [sessionId, traceId]
   );
@@ -221,8 +218,6 @@ export default function Home() {
     setTraceSigmaGraph(null);
     setTraceTargetPod(null);
     setTraceError(null);
-    setTraceCaptureActive(false);
-    setTraceCaptureBusy(false);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -267,6 +262,8 @@ export default function Home() {
     const w = await fetchWorkloads(session.session_id, selectedNamespaces);
     setWorkloadGroups(w);
     setWorkspaceReady(true);
+    setActiveSection("capture");
+    syncAppUrl("capture");
     setSelectedPods({});
     setSelectedOwners({});
     fetchCaptureLimits(session.session_id)
@@ -424,9 +421,8 @@ export default function Home() {
       setTraceDestPods(resp.dest_pods ?? []);
       setTraceSource(resp.source);
       setTraceDest(resp.destination);
-      setTraceView("cop");
+      setTraceView("sigma");
       setTracePaused(false);
-      setTraceCaptureActive(false);
       setActiveSection("trace");
       syncAppUrl("trace", resp.trace_id);
     } catch (e) {
@@ -450,51 +446,14 @@ export default function Home() {
       setTraceTargetPod(null);
       setTraceSourcePods([]);
       setTraceDestPods([]);
-      setTraceView("cop");
+      setTraceView("sigma");
       setTracePaused(false);
-      setTraceCaptureActive(false);
       setSessionId(null);
       setTopology(null);
       setCaptureSummary(null);
       setTraceBusy(false);
       setActiveSection("workspace");
       syncAppUrl("workspace");
-    }
-  }, [session, traceId]);
-
-  const startTraceLiveCapture = useCallback(async () => {
-    if (!session?.session_id || !traceId) return;
-    setTraceCaptureBusy(true);
-    setTraceError(null);
-    try {
-      const resp = await startTraceCapture(session.session_id, traceId);
-      setSessionId(resp.capture_session_id);
-      setTraceCaptureActive(true);
-      setCapturing(true);
-      setCapturePods(
-        traceSourcePods.map((p) => ({ namespace: p.namespace, name: p.name, uid: p.uid }))
-      );
-      setTrackedPodIds(traceSourcePods.map((p) => `${p.namespace}/${p.name}`));
-      setActiveSection("microservices");
-      syncAppUrl("microservices", traceId);
-    } catch (e) {
-      setTraceError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTraceCaptureBusy(false);
-    }
-  }, [session, traceId, traceSourcePods]);
-
-  const stopTraceLiveCapture = useCallback(async () => {
-    if (!session?.session_id || !traceId) return;
-    setTraceCaptureBusy(true);
-    try {
-      await stopTraceCapture(session.session_id, traceId);
-      setTraceCaptureActive(false);
-      setCapturing(false);
-    } catch (e) {
-      setTraceError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTraceCaptureBusy(false);
     }
   }, [session, traceId]);
 
@@ -516,43 +475,13 @@ export default function Home() {
             setTraceDestPods(data.dest_pods ?? []);
             if (data.source) setTraceSource(data.source);
             if (data.destination) setTraceDest(data.destination);
-            if (data.capture_session_id) {
-              setSessionId(data.capture_session_id);
-              setTraceCaptureActive(!!data.capture_active);
-              setCapturing(!!data.capture_active);
-            }
           })
           .catch((e) => setTraceError(e instanceof Error ? e.message : String(e)));
       }
-    } else if (section === "microservices") {
-      setActiveSection("microservices");
-      if (tid && tid !== traceId) {
-        fetchTraceGraph(session.session_id, tid)
-          .then((data) => {
-            setTraceId(data.trace_id);
-            setTraceGraph(data.graph);
-            setTraceSourcePods(data.source_pods ?? []);
-            setTraceDestPods(data.dest_pods ?? []);
-            if (data.source) setTraceSource(data.source);
-            if (data.destination) setTraceDest(data.destination);
-            if (data.capture_session_id) {
-              setSessionId(data.capture_session_id);
-              setTraceCaptureActive(!!data.capture_active);
-              setCapturing(!!data.capture_active);
-            }
-          })
-          .catch((e) => setTraceError(e instanceof Error ? e.message : String(e)));
-      } else if (tid && session.session_id) {
-        fetchTraceStatus(session.session_id, tid)
-          .then((st) => {
-            if (st.capture_session_id) {
-              setSessionId(st.capture_session_id);
-              setTraceCaptureActive(!!st.capture_active);
-              setCapturing(!!st.capture_active);
-            }
-          })
-          .catch(() => undefined);
-      }
+    } else if (section === "apptraffic") {
+      setActiveSection("apptraffic");
+    } else if (section === "capture") {
+      setActiveSection("capture");
     }
   }, [session?.session_id, workspaceReady, traceId]);
 
@@ -731,10 +660,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!sessionId || !session?.session_id) return;
-    if (!capturing && !traceCaptureActive) return;
+    if (!capturing) return;
     const id = window.setInterval(() => loadFlowTopology(), 8000);
     return () => window.clearInterval(id);
-  }, [sessionId, capturing, traceCaptureActive, session?.session_id, loadFlowTopology]);
+  }, [sessionId, capturing, session?.session_id, loadFlowTopology]);
 
   useEffect(() => {
     if (!workspaceReady || !session?.session_id) return;
@@ -782,6 +711,15 @@ export default function Home() {
   }, [session, sessionId]);
 
   const captureStartBlocked = !hasSelection || (s3Active && !s3Tested);
+  const captureScopeLabel = useMemo(
+    () => buildCaptureScopeLabel(captureSelections, selectedPodList),
+    [captureSelections, selectedPodList]
+  );
+  const captureScopeDetail = useMemo(
+    () => captureScopeSummary(selectedNamespaces, captureSelections, capturePods.length || selectedPodList.length),
+    [selectedNamespaces, captureSelections, capturePods.length, selectedPodList.length]
+  );
+  const appTrafficAvailable = workspaceReady && !!sessionId;
   const handleDownloadMerged = useCallback(async () => {
     if (!session?.session_id || !sessionId) return;
     setExportBusy(true);
@@ -913,9 +851,12 @@ export default function Home() {
   }
 
   const traceAvailable = workspaceReady;
-  const microservicesAvailable = workspaceReady && !!traceId;
+  const captureAvailable = workspaceReady;
   const showSection =
-    activeSection === "trace" || activeSection === "flow" || activeSection === "microservices"
+    activeSection === "capture" ||
+    activeSection === "trace" ||
+    activeSection === "flow" ||
+    activeSection === "apptraffic"
       ? activeSection
       : "workspace";
 
@@ -939,7 +880,7 @@ export default function Home() {
             </p>
           ) : (
             <p className="text-xs text-siem-muted mt-0.5">
-              Select source and destination, then run discovery across all related networking artefacts
+              Cross-namespace · IP or workload · maps app endpoints to infrastructure hops
             </p>
           )}
         </div>
@@ -991,6 +932,37 @@ export default function Home() {
           )}
         </div>
       </div>
+    ) : showSection === "capture" ? (
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs text-siem-muted">
+            Workspace <span className="mx-1 opacity-50">/</span> Capture
+          </p>
+          <h1 className="text-lg font-semibold text-siem-text">Pod & workload capture</h1>
+          <p className="text-xs text-siem-muted font-mono mt-0.5">{captureScopeDetail}</p>
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
+          {!capturing ? (
+            <button
+              type="button"
+              className="fluent-capture-start"
+              onClick={startCapture}
+              disabled={captureStartBlocked}
+            >
+              Start capture
+            </button>
+          ) : (
+            <button type="button" className="fluent-capture-stop" onClick={stopCapture}>
+              Stop capture
+            </button>
+          )}
+          {sessionId && (
+            <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("apptraffic")}>
+              App network
+            </button>
+          )}
+        </div>
+      </div>
     ) : showSection === "flow" ? (
       <div>
         <p className="text-xs text-siem-muted">
@@ -1001,36 +973,33 @@ export default function Home() {
           {sessionId ? `Session ${sessionId.slice(0, 8)}…` : "Start a capture to populate the graph"}
         </p>
       </div>
-    ) : showSection === "microservices" ? (
+    ) : showSection === "apptraffic" ? (
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="text-xs text-siem-muted">
-            Workspace <span className="mx-1 opacity-50">/</span> Packet Trace <span className="mx-1 opacity-50">/</span> L7 analysis
+            Workspace <span className="mx-1 opacity-50">/</span> Application network
           </p>
-          <h1 className="text-lg font-semibold text-siem-text">Microservice & L7 analysis</h1>
-          {traceId && (
-            <p className="text-xs text-siem-muted font-mono mt-0.5">
-              {endpointLabel(traceSource)}
-              <span className="mx-2 opacity-50">→</span>
-              {endpointLabel(traceDest)}
-            </p>
-          )}
+          <h1 className="text-lg font-semibold text-siem-text">Application network behavior</h1>
+          <p className="text-xs text-siem-muted font-mono mt-0.5">{captureScopeDetail}</p>
         </div>
         <div className="flex gap-2 flex-wrap items-center">
-          <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("trace")}>
-            Back to trace
+          <button type="button" className="siem-btn-ghost" onClick={() => navigateSection("capture")}>
+            Capture scope
           </button>
-          {!traceCaptureActive && traceId && (
-            <button
-              type="button"
-              className="siem-btn-primary"
-              disabled={traceCaptureBusy}
-              onClick={() => startTraceLiveCapture().catch(() => undefined)}
-            >
-              {traceCaptureBusy ? "Starting…" : "Start live capture"}
+          {!capturing && (
+            <button type="button" className="siem-btn-primary" onClick={startCapture} disabled={captureStartBlocked}>
+              Start capture
             </button>
           )}
         </div>
+      </div>
+    ) : showSection === "workspace" && workspaceReady ? (
+      <div>
+        <h1 className="text-lg font-semibold text-siem-text">Investigation workspace</h1>
+        <p className="text-xs text-siem-muted font-mono mt-0.5">
+          {session?.cluster ? `${session.cluster} · ` : ""}
+          Namespaces: {selectedNamespaces.join(", ")}
+        </p>
       </div>
     ) : (
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1078,8 +1047,9 @@ export default function Home() {
           sessionActive={!!session}
           captureActive={capturing}
           traceActive={!!traceId}
-          microservicesAvailable={microservicesAvailable}
-          microservicesActive={traceCaptureActive}
+          appTrafficAvailable={appTrafficAvailable}
+          appTrafficActive={capturing && !!sessionId}
+          captureAvailable={captureAvailable}
           active={showAI ? "ai" : activeSection}
           flowAvailable={!!sessionId}
           traceAvailable={traceAvailable}
@@ -1095,8 +1065,25 @@ export default function Home() {
         <p className="text-sm text-siem-err whitespace-pre-wrap siem-card px-4 py-3">{traceError}</p>
       )}
 
-      {showSection === "workspace" && (
+      {showSection === "workspace" && workspaceReady && (
+        <div className="space-y-4 max-w-3xl">
+          <LayerScopeBanner layer={LAYER_SCOPES.capture} detail={selectedNamespaces.join(", ")} />
+          <div className="grid sm:grid-cols-3 gap-3">
+            <LayerLink title="Capture" desc="PCAP from pods or workloads" onClick={() => navigateSection("capture")} />
+            <LayerLink title="Packet Trace" desc="Source → dest infra map" onClick={() => navigateSection("trace")} />
+            <LayerLink
+              title="App network"
+              desc="Ingress, replies, in-scope calls"
+              onClick={() => navigateSection("apptraffic")}
+              disabled={!appTrafficAvailable}
+            />
+          </div>
+        </div>
+      )}
+
+      {showSection === "capture" && (
       <div ref={workspaceRef} className="space-y-6">
+      <LayerScopeBanner layer={LAYER_SCOPES.capture} detail={captureScopeLabel} />
       {session && (
         <S3CapturePanel
           authSessionId={session.session_id}
@@ -1206,7 +1193,8 @@ export default function Home() {
       )}
 
       {showSection === "flow" && sessionId && (
-        <div ref={flowGraphRef} className="scroll-mt-6">
+        <div ref={flowGraphRef} className="scroll-mt-6 space-y-4">
+          <LayerScopeBanner layer={LAYER_SCOPES.flow} detail={captureScopeLabel} compact />
           <ObservabilityWorkbench
             topology={topology}
             sigmaGraph={sigmaGraph}
@@ -1242,6 +1230,7 @@ export default function Home() {
         <div ref={traceRef} className="scroll-mt-6 space-y-4" role="region" aria-label="Packet Trace">
           {traceId && traceGraph && session ? (
             <TraceWorkbench
+              authSessionId={session.session_id}
               traceId={traceId}
               source={traceSource}
               destination={traceDest}
@@ -1251,10 +1240,6 @@ export default function Home() {
               sigmaGraph={traceSigmaGraph}
               view={traceView}
               paused={tracePaused}
-              captureActive={traceCaptureActive}
-              captureBusy={traceCaptureBusy}
-              onStartCapture={() => startTraceLiveCapture().catch(() => undefined)}
-              onOpenL7={() => navigateSection("microservices")}
             />
           ) : (
             <>
@@ -1285,51 +1270,35 @@ export default function Home() {
         </div>
       )}
 
-      {showSection === "microservices" && traceId && sessionId && session && (
+      {showSection === "apptraffic" && sessionId && session && (
         <div className="scroll-mt-6">
-          <MicroserviceAnalysisWorkbench
-            traceId={traceId}
-            source={traceSource}
-            destination={traceDest}
+          <ApplicationNetworkWorkbench
+            scopeLabel={captureScopeLabel}
+            scopeSummary={captureScopeDetail}
             captureSessionId={sessionId}
+            trackedPodIds={trackedPodIds.length ? trackedPodIds : selectionPodIds}
             topology={topology}
             captureSummary={captureSummary}
             loading={flowsLoading}
-            captureActive={traceCaptureActive}
+            captureActive={capturing}
             onRefresh={() => loadFlowTopology()}
-            onStopCapture={() => stopTraceLiveCapture().catch(() => undefined)}
+            onOpenCapture={() => navigateSection("capture")}
           />
         </div>
       )}
 
-      {showSection === "microservices" && traceId && !sessionId && (
+      {showSection === "apptraffic" && !sessionId && (
         <SectionEmptyState
-          title="L7 microservice analysis"
-          description="Start live capture from Packet Trace to analyze service-to-service calls, TLS SNI, DNS, and application ports on the focused path."
+          title="Application network"
+          description="Shows how selected workloads behave on the wire — ingress into pods, replies, DNS/TLS, and calls inside your capture boundary. Namespace-scoped, unlike Packet Trace."
           steps={[
-            "Run source → destination path discovery in Packet Trace",
-            "Click Start live capture on path",
-            "Generate traffic between endpoints and refresh L7 stats",
+            "Open Capture and select pod(s) or Deployment / DS / StatefulSet",
+            "Start capture to ingest live packets",
+            "Open App network to inspect ingress, replies, and in-scope calls",
           ]}
           primaryAction={{
-            label: "Open Packet Trace",
-            onClick: () => navigateSection("trace"),
-          }}
-          secondaryAction={{
-            label: "Start capture now",
-            onClick: () => startTraceLiveCapture().catch(() => undefined),
-            disabled: traceCaptureBusy,
-          }}
-        />
-      )}
-
-      {showSection === "microservices" && !traceId && (
-        <SectionEmptyState
-          title="L7 microservice analysis"
-          description="Complete Packet Trace discovery first — L7 analysis is scoped to an active trace session."
-          primaryAction={{
-            label: "Go to workspace",
-            onClick: () => navigateSection("workspace"),
+            label: "Open Capture",
+            onClick: () => navigateSection("capture"),
           }}
         />
       )}
@@ -1348,6 +1317,30 @@ export default function Home() {
       )}
       </div>
     </AppShell>
+  );
+}
+
+function LayerLink({
+  title,
+  desc,
+  onClick,
+  disabled,
+}: {
+  title: string;
+  desc: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="siem-card p-4 text-left hover:bg-siem-panel/50 transition disabled:opacity-40"
+    >
+      <p className="text-sm font-semibold text-siem-text">{title}</p>
+      <p className="text-xs text-siem-muted mt-1">{desc}</p>
+    </button>
   );
 }
 

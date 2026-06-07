@@ -1,10 +1,16 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { SigmaGraph } from "@/lib/graph";
-import type { PathSummary, TraceEndpoint, TraceGraph } from "@/lib/trace";
+import type { EdgePaintState, PathSummary, TraceEndpoint, TraceGraph } from "@/lib/trace";
 import { endpointLabel } from "@/lib/trace";
+import { LayerScopeBanner } from "@/components/layout/LayerScopeBanner";
+import { LAYER_SCOPES } from "@/lib/sections";
+import { DEFAULT_TRACE_FILTER, filterSigmaGraph, filterTraceGraph } from "@/lib/traceGraphFilter";
 import { TraceFlowCanvas } from "./TraceFlowCanvas";
+import { TraceGraphFilters } from "./TraceGraphFilters";
+import { TraceProbePanel } from "./TraceProbePanel";
 import { TraceStatsBar } from "./TraceStatsBar";
 
 const SigmaTopologyGraph = dynamic(
@@ -22,6 +28,7 @@ const SigmaTopologyGraph = dynamic(
 export type TraceView = "cop" | "sigma";
 
 type Props = {
+  authSessionId: string;
   traceId: string;
   source: TraceEndpoint;
   destination: TraceEndpoint;
@@ -31,10 +38,6 @@ type Props = {
   sigmaGraph?: SigmaGraph | null;
   view: TraceView;
   paused: boolean;
-  captureActive?: boolean;
-  captureBusy?: boolean;
-  onStartCapture?: () => void;
-  onOpenL7?: () => void;
 };
 
 function statusBadge(status: string) {
@@ -54,6 +57,7 @@ function statusBadge(status: string) {
 }
 
 export function TraceWorkbench({
+  authSessionId,
   traceId,
   source,
   destination,
@@ -63,11 +67,14 @@ export function TraceWorkbench({
   sigmaGraph,
   view,
   paused,
-  captureActive,
-  captureBusy,
-  onStartCapture,
-  onOpenL7,
 }: Props) {
+  const [filter, setFilter] = useState(DEFAULT_TRACE_FILTER);
+  const [edgeStates, setEdgeStates] = useState<Record<string, EdgePaintState>>({});
+  const [probeActive, setProbeActive] = useState(false);
+  const displayGraph = useMemo(() => filterTraceGraph(graph, filter), [graph, filter]);
+  const visibleIds = useMemo(() => new Set(displayGraph.nodes.map((n) => n.id)), [displayGraph]);
+  const displaySigma = useMemo(() => filterSigmaGraph(sigmaGraph, visibleIds), [sigmaGraph, visibleIds]);
+
   const paths = graph.paths ?? [];
   const ingress = paths.filter((p: PathSummary) => p.direction === "ingress");
   const egress = paths.filter((p: PathSummary) => p.direction === "egress");
@@ -98,14 +105,28 @@ export function TraceWorkbench({
 
       <TraceStatsBar graph={graph} />
 
+      <div className="px-5 py-3 border-b border-siem-border bg-siem-panel/30 space-y-3">
+        <TraceGraphFilters value={filter} stats={graph.stats} onChange={setFilter} />
+        <TraceProbePanel
+          authSessionId={authSessionId}
+          traceId={traceId}
+          onEdgeStates={setEdgeStates}
+          onProbingChange={setProbeActive}
+        />
+      </div>
+
       <div className="relative fluent-graph-stage overflow-hidden flex-1 min-h-[560px]">
         {view === "cop" ? (
           <div className="h-full overflow-x-auto p-4">
-            <TraceFlowCanvas graph={graph} animate={!paused} />
+            <TraceFlowCanvas
+              graph={displayGraph}
+              animate={!paused && !probeActive}
+              edgeStates={edgeStates}
+            />
           </div>
         ) : (
           <SigmaTopologyGraph
-            graph={sigmaGraph ?? null}
+            graph={displaySigma ?? null}
             topology={null}
             selectedEdgeId={null}
             onSelectEdge={() => undefined}
@@ -124,34 +145,12 @@ export function TraceWorkbench({
           )}
         </div>
         <div className="p-4 border-l-4 border-siem-border md:border-l-0 md:border-t-0 border-l-siem-accent/40 bg-siem-panel/20">
-          <h3 className="text-sm font-semibold mb-2">On demand: live capture & L7</h3>
-          <p className="text-sm text-siem-muted mb-4">
-            Start eBPF capture on resolved source pods only. Service-to-service calls, TLS SNI, DNS, and app ports
-            appear in L7 analysis while the trace session stays open.
+          <LayerScopeBanner layer={LAYER_SCOPES.trace} compact />
+          <p className="text-sm text-siem-muted mt-3">
+            Discovery maps predicted hops. Use <strong className="text-siem-text font-medium">Probe paint</strong> to
+            mark a test packet and correlate live observations onto primary edges, or use{" "}
+            <strong className="text-siem-text font-medium">Capture</strong> for PCAP within a namespace boundary.
           </p>
-          <div className="flex flex-wrap gap-2">
-            {!captureActive ? (
-              <button
-                type="button"
-                className="siem-btn-primary text-sm"
-                disabled={captureBusy || !onStartCapture}
-                onClick={onStartCapture}
-              >
-                {captureBusy ? "Starting capture…" : "Start live capture on path"}
-              </button>
-            ) : (
-              <>
-                <span className="text-[10px] px-2 py-1 rounded-md text-siem-ok border border-siem-ok/30 self-center">
-                  capture live
-                </span>
-                {onOpenL7 && (
-                  <button type="button" className="siem-btn-ghost text-sm" onClick={onOpenL7}>
-                    Open L7 analysis
-                  </button>
-                )}
-              </>
-            )}
-          </div>
         </div>
       </div>
     </section>
