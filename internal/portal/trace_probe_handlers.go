@@ -75,17 +75,34 @@ func (s *Server) handleTraceProbeFire(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "trace session not found", http.StatusNotFound)
 		return
 	}
+	authSID, err := s.authSessionID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	csWrap, _ := s.userClient(r)
 	cfg, _ := s.userRESTConfig(r)
 	var cs kubernetes.Interface
 	if csWrap != nil {
 		cs = csWrap.Interface
 	}
+
 	captureID := traceCaptureSessionID(req.TraceID)
+	captureAutoStarted := false
+	if !req.Simulate {
+		if res, capErr := s.ensureTraceCapture(r.Context(), r, authSID, req.TraceID, sess); capErr == nil && res != nil {
+			captureID = res.CaptureSessionID
+			captureAutoStarted = !res.AlreadyRunning
+		}
+	}
+
 	resp, err := probe.Fire(r.Context(), cs, cfg, sess.Response, req, captureID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if captureAutoStarted {
+		resp.CaptureAutoStarted = true
 	}
 	writeJSON(w, resp)
 }

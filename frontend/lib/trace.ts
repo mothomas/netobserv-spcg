@@ -283,6 +283,7 @@ export type ProbeFireResponse = {
   mode: "simulate" | "capture" | "live" | string;
   primary_edges: number;
   capture_linked?: boolean;
+  capture_auto_started?: boolean;
 };
 
 export type ProbeEvent = {

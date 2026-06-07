@@ -169,9 +169,10 @@ export function TraceWorkbench({
         <div className="p-4 border-l-4 border-siem-border md:border-l-0 md:border-t-0 border-l-siem-accent/40 bg-siem-panel/20">
           <LayerScopeBanner layer={LAYER_SCOPES.trace} compact />
           <p className="text-sm text-siem-muted mt-3">
-            Run discovery, then <strong className="text-siem-text font-medium">Verify path</strong> to paint primary hops
-            from a marked probe. Enable <strong className="text-siem-text font-medium">Demo policy block</strong> to show a
-            red drop on the final hop for security audiences.
+            Run discovery, then <strong className="text-siem-text font-medium">Verify path</strong> — capture,
+            probe, and hop paint run automatically. Enable{" "}
+            <strong className="text-siem-text font-medium">Demo policy block</strong> to show a red drop on the final
+            hop.
           </p>
         </div>
       </div>

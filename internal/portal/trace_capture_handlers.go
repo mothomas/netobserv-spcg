@@ -3,6 +3,7 @@ package portal
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -10,6 +11,61 @@ import (
 	"github.com/netobserv/spcg/internal/pcap"
 	"github.com/netobserv/spcg/internal/trace"
 )
+
+type traceCaptureEnsureResult struct {
+	CaptureSessionID string
+	AlreadyRunning   bool
+	ResolvedPods     int
+	SensorFilters    int
+}
+
+// ensureTraceCapture starts trace-scoped capture ingest when missing.
+func (s *Server) ensureTraceCapture(ctx context.Context, r *http.Request, authSID, traceID string, sess *traceSession) (*traceCaptureEnsureResult, error) {
+	if sess == nil {
+		return nil, fmt.Errorf("trace session not found")
+	}
+	if existing := traceCaptureSessionID(traceID); existing != "" {
+		if _, ok := pcap.Get(existing); ok {
+			return &traceCaptureEnsureResult{
+				CaptureSessionID: existing,
+				AlreadyRunning:   true,
+			}, nil
+		}
+		stopTraceCapture(traceID)
+	}
+
+	selections := traceCaptureSelections(sess.Response)
+	if len(selections) == 0 {
+		return nil, fmt.Errorf("trace has no source pods to capture")
+	}
+	cs, err := s.userClient(r)
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := spcgk8s.ResolveCaptureSelections(ctx, cs, selections)
+	if err != nil {
+		return nil, err
+	}
+
+	sessNS := ""
+	if len(sess.Response.Graph.Namespaces) > 0 {
+		sessNS = sess.Response.Graph.Namespaces[0]
+	}
+	prep, err := s.prepareCaptureIngest(ctx, authSID, resolved, sessNS, pcap.S3CaptureConfig{Enabled: false})
+	if err != nil {
+		return nil, err
+	}
+
+	ingestCtx, cancel := context.WithCancel(context.Background())
+	linkTraceCapture(traceID, prep.Session.ID, cancel)
+	go s.runCaptureIngest(ingestCtx, prep)
+
+	return &traceCaptureEnsureResult{
+		CaptureSessionID: prep.Session.ID,
+		ResolvedPods:     len(resolved.Pods),
+		SensorFilters:    len(resolved.SensorTargets),
+	}, nil
+}
 
 func (s *Server) registerTraceCaptureRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/trace/capture/start", s.handleTraceCaptureStart)
@@ -47,56 +103,18 @@ func (s *Server) handleTraceCaptureStart(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "trace session not found", http.StatusNotFound)
 		return
 	}
-	if existing := traceCaptureSessionID(traceID); existing != "" {
-		if _, ok := pcap.Get(existing); ok {
-			writeJSON(w, map[string]interface{}{
-				"trace_id":            traceID,
-				"capture_session_id":  existing,
-				"capture_active":      captureStreamActive(existing),
-				"source_pods":         len(sess.Response.SourcePods),
-				"already_running":     true,
-			})
-			return
-		}
-		stopTraceCapture(traceID)
-	}
-
-	selections := traceCaptureSelections(sess.Response)
-	if len(selections) == 0 {
-		http.Error(w, "trace has no source pods to capture", http.StatusBadRequest)
-		return
-	}
-	cs, err := s.userClient(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	resolved, err := spcgk8s.ResolveCaptureSelections(r.Context(), cs, selections)
+	res, err := s.ensureTraceCapture(r.Context(), r, authSID, traceID, sess)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	sessNS := ""
-	if len(sess.Response.Graph.Namespaces) > 0 {
-		sessNS = sess.Response.Graph.Namespaces[0]
-	}
-	prep, err := s.prepareCaptureIngest(r.Context(), authSID, resolved, sessNS, pcap.S3CaptureConfig{Enabled: false})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusTooManyRequests)
-		return
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	linkTraceCapture(traceID, prep.Session.ID, cancel)
-	go s.runCaptureIngest(ctx, prep)
-
 	writeJSON(w, map[string]interface{}{
 		"trace_id":           traceID,
-		"capture_session_id": prep.Session.ID,
+		"capture_session_id": res.CaptureSessionID,
 		"capture_active":     true,
-		"resolved_pods":      len(resolved.Pods),
-		"sensor_filters":     len(resolved.SensorTargets),
+		"resolved_pods":      res.ResolvedPods,
+		"sensor_filters":     res.SensorFilters,
+		"already_running":    res.AlreadyRunning,
 	})
 }
 

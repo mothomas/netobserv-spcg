@@ -111,7 +111,9 @@ func Fire(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config, resp t
 		mode = "capture"
 		captureLinked = true
 		LinkCaptureSession(s.captureSessionID, resp.TraceID, icmpID)
-	case cs == nil:
+	case cs != nil && cfg != nil:
+		mode = "live"
+	default:
 		mode = "simulate"
 		s.simulate = true
 	}
@@ -139,23 +141,18 @@ func Fire(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config, resp t
 	go func() {
 		defer stopSession(resp.TraceID)
 		switch mode {
-		case "simulate":
-			runSimulatedPaint(child, s)
-		case "capture":
+		case "capture", "live":
 			if destIP, err := resolveDestIP(resp); err == nil {
 				go execProbePing(child, cfg, cs, resp.TargetPod, iface, destIP)
-			}
-			runCapturePaintLoop(child, s)
-		default:
-			destIP, err := resolveDestIP(resp)
-			if err != nil {
+			} else if mode == "live" {
 				s.broadcast(ProbeEvent{Type: "error", TraceID: resp.TraceID, ProbeID: probeID, Message: err.Error()})
-				runSimulatedPaint(child, s)
+			}
+			if mode == "capture" {
+				runCapturePaintLoop(child, s)
 				return
 			}
-			if err := execProbePing(child, cfg, cs, resp.TargetPod, iface, destIP); err != nil {
-				s.broadcast(ProbeEvent{Type: "error", TraceID: resp.TraceID, ProbeID: probeID, Message: err.Error()})
-			}
+			runSimulatedPaint(child, s)
+		default:
 			runSimulatedPaint(child, s)
 		}
 	}()

@@ -2,13 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EdgePaintState, ProbeAttachInterface, ProbeEvent } from "@/lib/trace";
-import {
-  fetchProbeInterfaces,
-  fetchTraceStatus,
-  fireTraceProbe,
-  startTraceCapture,
-  streamTraceProbeEvents,
-} from "@/lib/trace";
+import { fetchProbeInterfaces, fetchTraceStatus, fireTraceProbe, streamTraceProbeEvents } from "@/lib/trace";
 
 type Props = {
   authSessionId: string;
@@ -32,8 +26,8 @@ export function TraceProbePanel({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [paintToken, setPaintToken] = useState<string | null>(null);
-  const [mode, setMode] = useState<string>("simulate");
-  const [simulate, setSimulate] = useState(true);
+  const [mode, setMode] = useState<string>("capture");
+  const [simulate, setSimulate] = useState(false);
   const [demoDrop, setDemoDrop] = useState(false);
   const [captureActive, setCaptureActive] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -124,16 +118,11 @@ export function TraceProbePanel({
   const verifyPath = async () => {
     setBusy(true);
     setError(null);
-    setStatus(null);
+    setStatus("Starting capture, firing probe, correlating hops…");
     setDropReason(null);
     onProbingChange?.(true);
     const abort = new AbortController();
     try {
-      if (!simulate && !captureActive) {
-        setStatus("Starting trace capture for live correlation…");
-        const cap = await startTraceCapture(authSessionId, traceId);
-        setCaptureActive(cap.capture_active);
-      }
       const resp = await fireTraceProbe(authSessionId, traceId, {
         interface: iface,
         simulate,
@@ -141,13 +130,18 @@ export function TraceProbePanel({
       });
       setPaintToken(resp.paint_token);
       setMode(resp.mode);
+      setCaptureActive(resp.capture_linked || resp.capture_auto_started || captureActive);
       setTotal(resp.primary_edges);
       syncProgress(0, resp.primary_edges);
-      setStatus(
-        resp.capture_linked
-          ? `Correlating ${resp.paint_token} with live capture (${resp.primary_edges} hops)`
-          : `Walking ${resp.primary_edges} predicted hops · ${resp.paint_token} (${resp.mode})`
-      );
+      if (resp.capture_auto_started) {
+        setStatus(`Capture started · correlating ${resp.paint_token} (${resp.primary_edges} hops)`);
+      } else if (resp.capture_linked) {
+        setStatus(`Correlating ${resp.paint_token} with live capture (${resp.primary_edges} hops)`);
+      } else if (resp.mode === "simulate") {
+        setStatus(`Walking ${resp.primary_edges} predicted hops · ${resp.paint_token}`);
+      } else {
+        setStatus(`Verifying ${resp.primary_edges} hops · ${resp.paint_token} (${resp.mode})`);
+      }
       await streamTraceProbeEvents(authSessionId, traceId, applyEvent, abort.signal);
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
@@ -177,8 +171,8 @@ export function TraceProbePanel({
             )}
           </div>
           <p className="text-xs text-siem-muted max-w-2xl">
-            Mark a test packet from the source pod, correlate observations onto primary hops, and paint the path map
-            green — or red when policy blocks egress.
+            One click starts trace capture, fires a marked probe from the source pod, and paints verified hops on the
+            path map. Use demo policy block to show a red drop on the final hop.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
@@ -225,7 +219,7 @@ export function TraceProbePanel({
           className="text-siem-accent hover:underline"
           onClick={() => setShowAdvanced((v) => !v)}
         >
-          {showAdvanced ? "Hide options" : "Interface & mode"}
+          {showAdvanced ? "Hide options" : "Advanced"}
         </button>
       </div>
 
@@ -249,7 +243,7 @@ export function TraceProbePanel({
           </label>
           <label className="flex items-center gap-2 text-xs text-siem-muted pb-2">
             <input type="checkbox" checked={simulate} disabled={busy} onChange={(e) => setSimulate(e.target.checked)} />
-            Simulate (cinematic walk — no cluster exec)
+            Simulate only (skip capture and ping)
           </label>
         </div>
       )}

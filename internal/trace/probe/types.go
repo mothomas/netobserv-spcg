@@ -26,14 +26,15 @@ type FireRequest struct {
 
 // FireResponse acknowledges a probe session and paint token.
 type FireResponse struct {
-	ProbeID       string `json:"probe_id"`
-	TraceID       string `json:"trace_id"`
-	PaintToken    string `json:"paint_token"`
-	ICMPID        uint16 `json:"icmp_id"`
-	Interface     string `json:"interface"`
-	Mode          string `json:"mode"` // simulate | capture | live
-	PrimaryEdges  int    `json:"primary_edges"`
-	CaptureLinked bool   `json:"capture_linked,omitempty"`
+	ProbeID            string `json:"probe_id"`
+	TraceID            string `json:"trace_id"`
+	PaintToken         string `json:"paint_token"`
+	ICMPID             uint16 `json:"icmp_id"`
+	Interface          string `json:"interface"`
+	Mode               string `json:"mode"` // simulate | capture | live
+	PrimaryEdges       int    `json:"primary_edges"`
+	CaptureLinked      bool   `json:"capture_linked,omitempty"`
+	CaptureAutoStarted bool   `json:"capture_auto_started,omitempty"`
 }
 
 // ProbeEvent is streamed to the UI while a probe is active.
