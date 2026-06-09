@@ -152,9 +152,21 @@ func (b *graphBuilder) addPath(direction, resource, ns, kind, status, detail str
 
 func (b *graphBuilder) finish(traceID string) TraceGraph {
 	markFocusPath(b)
-	g, lanes := applyLayout(b.nodes)
+	anchorID := b.anchorPodID()
+	pathOpts := buildPathOptions(b.nodes, b.edges, b.paths, anchorID)
+	applyPathRefs(b.nodes, b.edges, pathOpts, anchorID)
+
+	var g TraceGraph
+	var lanes []TraceLane
+	if len(pathOpts) > 0 {
+		g, lanes = applyPathLayout(b.nodes, pathOpts, anchorID)
+	} else {
+		g, lanes = applyLayout(b.nodes)
+	}
 	g.Edges = b.edges
 	g.Paths = b.paths
+	g.PathOptions = pathOpts
+	g.AnchorNodeID = anchorID
 	g.TraceID = traceID
 	g.Lanes = lanes
 	ns := make([]string, 0, len(b.scope))

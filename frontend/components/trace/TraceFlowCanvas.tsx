@@ -1,10 +1,13 @@
 "use client";
 
+import { useMemo } from "react";
 import type { TraceEdge, TraceGraph, TraceNode } from "@/lib/trace";
 
 type Props = {
   graph: TraceGraph;
   animate?: boolean;
+  selectedPathIds?: string[];
+  showContext?: boolean;
 };
 
 function edgePath(from: TraceNode, to: TraceNode, nodeW: number, nodeH: number): string {
@@ -59,7 +62,23 @@ function FlowPacket({
   );
 }
 
-export function TraceFlowCanvas({ graph, animate = true }: Props) {
+function nodeLit(
+  n: TraceNode,
+  selected: Set<string>,
+  anchorId?: string
+): boolean {
+  if (selected.size === 0) return n.focused || n.tracked || n.track !== "context";
+  if (anchorId && n.id === anchorId) return true;
+  return (n.path_refs ?? []).some((r) => selected.has(r));
+}
+
+export function TraceFlowCanvas({
+  graph,
+  animate = true,
+  selectedPathIds = [],
+  showContext = true,
+}: Props) {
+  const selected = useMemo(() => new Set(selectedPathIds), [selectedPathIds]);
   const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
   const defaultW = graph.nodes[0]?.width ?? 148;
   const defaultH = graph.nodes[0]?.height ?? 72;
@@ -110,8 +129,18 @@ export function TraceFlowCanvas({ graph, animate = true }: Props) {
 
           {graph.edges.map((e) => {
             const d = pathForEdge(e);
-            const dim = !e.primary && !e.drop;
-            const stroke = e.drop ? "var(--siem-err)" : e.primary ? "var(--siem-accent)" : "var(--siem-border-hi)";
+            const pathLit =
+              selected.size === 0
+                ? e.primary || e.drop
+                : (e.path_refs ?? []).some((r) => selected.has(r)) || e.primary;
+            const dim = !pathLit;
+            const stroke = e.drop
+              ? "var(--siem-err)"
+              : pathLit
+                ? e.direction === "egress"
+                  ? "var(--siem-ok)"
+                  : "var(--siem-accent)"
+                : "var(--siem-border-hi)";
             return (
               <path
                 key={e.id}
@@ -150,10 +179,11 @@ export function TraceFlowCanvas({ graph, animate = true }: Props) {
           )}
 
           {graph.nodes.map((n) => {
+            if (!showContext && n.track === "context") return null;
             const w = n.width || defaultW;
             const h = n.height || defaultH;
             const endpoint = n.tracked;
-            const onPath = n.focused || endpoint;
+            const onPath = nodeLit(n, selected, graph.anchor_node_id) || n.focused || endpoint;
             const dim = !onPath;
             return (
               <g key={n.id} transform={`translate(${n.x}, ${n.y})`} opacity={dim ? 0.28 : 1}>

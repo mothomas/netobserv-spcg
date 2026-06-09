@@ -1,19 +1,21 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { SigmaGraph } from "@/lib/graph";
 import type { PathSummary, TraceEndpoint, TraceGraph } from "@/lib/trace";
 import { endpointLabel } from "@/lib/trace";
 import { TraceFlowCanvas } from "./TraceFlowCanvas";
+import { TracePathOptionList } from "./TracePathOptionList";
 import { TraceStatsBar } from "./TraceStatsBar";
 
-const SigmaTopologyGraph = dynamic(
-  () => import("@/components/SigmaTopologyGraph").then((m) => m.SigmaTopologyGraph),
+const TraceSigmaPathMap = dynamic(
+  () => import("./TraceSigmaPathMap").then((m) => m.TraceSigmaPathMap),
   {
     ssr: false,
     loading: () => (
       <div className="h-full flex items-center justify-center text-sm text-siem-muted px-6 text-center">
-        Loading Sigma graph…
+        Loading Sigma path map…
       </div>
     ),
   }
@@ -53,6 +55,17 @@ function statusBadge(status: string) {
   );
 }
 
+function defaultPathSelection(graph: TraceGraph): string[] {
+  const opts = graph.path_options ?? [];
+  if (!opts.length) return [];
+  const ingress = opts.find((p) => p.direction === "ingress");
+  const egress = opts.find((p) => p.direction === "egress");
+  const out: string[] = [];
+  if (ingress) out.push(ingress.id);
+  if (egress) out.push(egress.id);
+  return out;
+}
+
 export function TraceWorkbench({
   traceId,
   source,
@@ -69,9 +82,44 @@ export function TraceWorkbench({
   onOpenL7,
 }: Props) {
   const paths = graph.paths ?? [];
+  const pathOptions = graph.path_options ?? [];
   const ingress = paths.filter((p: PathSummary) => p.direction === "ingress");
   const egress = paths.filter((p: PathSummary) => p.direction === "egress");
   const host = paths.filter((p: PathSummary) => p.direction === "host");
+
+  const [selectedPathIds, setSelectedPathIds] = useState<string[]>(() => defaultPathSelection(graph));
+  const [showContext, setShowContext] = useState(true);
+
+  useEffect(() => {
+    setSelectedPathIds(defaultPathSelection(graph));
+  }, [graph.trace_id, pathOptions.length]);
+
+  const hasPathOptions = pathOptions.length > 0;
+
+  const togglePath = (id: string) => {
+    setSelectedPathIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const graphStage = useMemo(() => {
+    if (view === "cop") {
+      return (
+        <TraceFlowCanvas
+          graph={graph}
+          animate={!paused}
+          selectedPathIds={selectedPathIds}
+          showContext={showContext}
+        />
+      );
+    }
+    return (
+      <TraceSigmaPathMap
+        sigmaGraph={sigmaGraph ?? null}
+        traceGraph={graph}
+        selectedPathIds={selectedPathIds}
+        showContext={showContext}
+      />
+    );
+  }, [view, graph, sigmaGraph, paused, selectedPathIds, showContext]);
 
   return (
     <section
@@ -98,24 +146,38 @@ export function TraceWorkbench({
 
       <TraceStatsBar graph={graph} />
 
-      <div className="relative fluent-graph-stage overflow-hidden flex-1 min-h-[560px]">
-        {view === "cop" ? (
-          <div className="h-full overflow-x-auto p-4">
-            <TraceFlowCanvas graph={graph} animate={!paused} />
-          </div>
-        ) : (
-          <SigmaTopologyGraph
-            graph={sigmaGraph ?? null}
-            topology={null}
-            selectedEdgeId={null}
-            onSelectEdge={() => undefined}
-          />
+      <div className="relative fluent-graph-stage overflow-hidden flex-1 min-h-[560px] flex">
+        {hasPathOptions && (
+          <aside className="w-[272px] shrink-0 border-r border-siem-border bg-siem-panel/30 overflow-y-auto p-4 hidden lg:block">
+            <h3 className="text-sm font-semibold text-siem-text mb-3">Path options</h3>
+            <TracePathOptionList
+              options={pathOptions}
+              selected={selectedPathIds}
+              onToggle={togglePath}
+              onClear={() => setSelectedPathIds([])}
+            />
+            <label className="flex items-center gap-2 text-xs text-siem-muted mt-4 pt-4 border-t border-siem-border">
+              <input type="checkbox" checked={showContext} onChange={(e) => setShowContext(e.target.checked)} />
+              Show context (policies, BGP, NAD)
+            </label>
+          </aside>
         )}
+        <div className="flex-1 min-w-0 min-h-[560px] relative">{graphStage}</div>
       </div>
 
       <div className="grid md:grid-cols-2 gap-0 border-t border-siem-border shrink-0">
         <div className="p-4 md:border-r border-siem-border">
           <h3 className="text-sm font-semibold mb-3">Discovered paths</h3>
+          {hasPathOptions && (
+            <div className="lg:hidden mb-4 pb-4 border-b border-siem-border">
+              <TracePathOptionList
+                options={pathOptions}
+                selected={selectedPathIds}
+                onToggle={togglePath}
+                onClear={() => setSelectedPathIds([])}
+              />
+            </div>
+          )}
           <PathTable title="Ingress" rows={ingress} />
           <PathTable title="Egress" rows={egress} />
           <PathTable title="Host" rows={host} />

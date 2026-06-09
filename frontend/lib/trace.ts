@@ -16,12 +16,26 @@ export type TraceEndpoint = {
   label_selector?: string;
 };
 
+export type PathOption = {
+  id: string;
+  direction: "ingress" | "egress" | "host" | "context";
+  mechanism: string;
+  label: string;
+  status: string;
+  namespace?: string;
+  hop_ids: string[];
+  edge_ids: string[];
+  confidence?: string;
+};
+
 export type TraceNode = {
   id: string;
   label: string;
   kind: string;
   namespace?: string;
   rank: number;
+  track?: string;
+  path_refs?: string[];
   x: number;
   y: number;
   width: number;
@@ -37,6 +51,8 @@ export type TraceEdge = {
   from: string;
   to: string;
   edge_type: string;
+  direction?: string;
+  path_refs?: string[];
   primary?: boolean;
   drop?: boolean;
   label?: string;
@@ -63,6 +79,8 @@ export type TraceGraph = {
   nodes: TraceNode[];
   edges: TraceEdge[];
   paths: PathSummary[];
+  path_options?: PathOption[];
+  anchor_node_id?: string;
   namespaces: string[];
   lanes?: TraceLane[];
   width: number;

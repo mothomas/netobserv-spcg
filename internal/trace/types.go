@@ -12,6 +12,29 @@ const (
 	HopDropped HopStatus = "dropped"
 )
 
+// PathDirection classifies flow relative to the anchor workload.
+type PathDirection string
+
+const (
+	PathIngress PathDirection = "ingress"
+	PathEgress  PathDirection = "egress"
+	PathHost    PathDirection = "host"
+	PathContext PathDirection = "context"
+)
+
+// PathOption is one discovered route (ordered chain, not the whole graph).
+type PathOption struct {
+	ID         string        `json:"id"`
+	Direction  PathDirection `json:"direction"`
+	Mechanism  string        `json:"mechanism"`
+	Label      string        `json:"label"`
+	Status     string        `json:"status"`
+	Namespace  string        `json:"namespace,omitempty"`
+	HopIDs     []string      `json:"hop_ids"`
+	EdgeIDs    []string      `json:"edge_ids"`
+	Confidence string        `json:"confidence,omitempty"`
+}
+
 // TraceNode is an infrastructure vertex in the packet-cop graph.
 type TraceNode struct {
 	ID        string  `json:"id"`
@@ -19,6 +42,8 @@ type TraceNode struct {
 	Kind      string  `json:"kind"`
 	Namespace string  `json:"namespace,omitempty"`
 	Rank      int     `json:"rank"`
+	Track     string  `json:"track,omitempty"` // ingress, egress, anchor, shared, context
+	PathRefs  []string `json:"path_refs,omitempty"`
 	X         float64 `json:"x"`
 	Y         float64 `json:"y"`
 	Width     float64 `json:"width"`
@@ -31,13 +56,15 @@ type TraceNode struct {
 
 // TraceEdge connects infrastructure nodes (path skeleton).
 type TraceEdge struct {
-	ID       string `json:"id"`
-	From     string `json:"from"`
-	To       string `json:"to"`
-	EdgeType string `json:"edge_type"` // direct, ingress, egress, policy, host
-	Primary  bool   `json:"primary,omitempty"`
-	Drop     bool   `json:"drop,omitempty"`
-	Label    string `json:"label,omitempty"`
+	ID        string        `json:"id"`
+	From      string        `json:"from"`
+	To        string        `json:"to"`
+	EdgeType  string        `json:"edge_type"` // direct, ingress, egress, policy, host
+	Direction PathDirection `json:"direction,omitempty"`
+	PathRefs  []string      `json:"path_refs,omitempty"`
+	Primary   bool          `json:"primary,omitempty"`
+	Drop      bool          `json:"drop,omitempty"`
+	Label     string        `json:"label,omitempty"`
 }
 
 // PathSummary is a discovered ingress/egress surface for the UI table.
@@ -52,14 +79,16 @@ type PathSummary struct {
 
 // TraceGraph is the infrastructure skeleton returned to the UI.
 type TraceGraph struct {
-	TraceID    string        `json:"trace_id,omitempty"`
-	Nodes      []TraceNode   `json:"nodes"`
-	Edges      []TraceEdge   `json:"edges"`
-	Paths      []PathSummary `json:"paths"`
-	Namespaces []string      `json:"namespaces"`
-	Lanes      []TraceLane   `json:"lanes,omitempty"`
-	Width      float64       `json:"width"`
-	Height     float64       `json:"height"`
+	TraceID      string        `json:"trace_id,omitempty"`
+	Nodes        []TraceNode   `json:"nodes"`
+	Edges        []TraceEdge   `json:"edges"`
+	Paths        []PathSummary `json:"paths"`
+	PathOptions  []PathOption  `json:"path_options,omitempty"`
+	AnchorNodeID string        `json:"anchor_node_id,omitempty"`
+	Namespaces   []string      `json:"namespaces"`
+	Lanes        []TraceLane   `json:"lanes,omitempty"`
+	Width        float64       `json:"width"`
+	Height       float64       `json:"height"`
 }
 
 // TraceLane labels a ranked column in the cop timeline.

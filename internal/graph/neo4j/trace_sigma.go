@@ -16,7 +16,7 @@ import (
 func SigmaGraphFromTrace(traceID string, g trace.TraceGraph) *SigmaGraph {
 	nodes := make([]SigmaNode, 0, len(g.Nodes))
 	for _, n := range g.Nodes {
-		color, border := traceNodeColors(n.Kind, n.Tracked || n.Focused)
+		color, border := traceNodeColors(n.Kind, n.Track, n.Tracked || n.Focused)
 		size := 10.0
 		if n.Tracked || n.Focused {
 			size = 14
@@ -50,7 +50,7 @@ func SigmaGraphFromTrace(traceID string, g trace.TraceGraph) *SigmaGraph {
 			Target:         e.To,
 			Label:          label,
 			EdgeType:       etype,
-			Color:          edgeColor(etype, ""),
+			Color:          traceEdgeColor(e),
 			Size:           traceEdgeSize(e),
 		})
 	}
@@ -83,7 +83,32 @@ func traceEdgeSize(e trace.TraceEdge) float64 {
 	return 1.5
 }
 
-func traceNodeColors(kind string, tracked bool) (color, border string) {
+func traceEdgeColor(e trace.TraceEdge) string {
+	switch string(e.Direction) {
+	case "ingress":
+		return "#60cdff"
+	case "egress":
+		return "#34d399"
+	case "context":
+		return "#64748b"
+	default:
+		return edgeColor(traceEdgeType(e), "")
+	}
+}
+
+func traceNodeColors(kind, track string, tracked bool) (color, border string) {
+	switch track {
+	case "anchor":
+		return "#9386f2", "#b4a8ff"
+	case "ingress":
+		return "#60cdff", "#94b4ff"
+	case "egress":
+		return "#34d399", "#6ee7b7"
+	case "context":
+		return "#64748b", "#94a3b8"
+	case "shared":
+		return "#7bafe9", "#94b4ff"
+	}
 	if tracked {
 		return "#60cdff", "#94b4ff"
 	}

@@ -121,7 +121,7 @@ export default function Home() {
   const [traceDest, setTraceDest] = useState<TraceEndpoint>(defaultDestEndpoint());
   const [traceSourcePods, setTraceSourcePods] = useState<PodDetail[]>([]);
   const [traceDestPods, setTraceDestPods] = useState<PodDetail[]>([]);
-  const [traceView, setTraceView] = useState<TraceView>("cop");
+  const [traceView, setTraceView] = useState<TraceView>("sigma");
   const [tracePaused, setTracePaused] = useState(false);
   const [traceCaptureActive, setTraceCaptureActive] = useState(false);
   const [traceCaptureBusy, setTraceCaptureBusy] = useState(false);
@@ -951,8 +951,8 @@ export default function Home() {
                 value={traceView}
                 onChange={setTraceView}
                 options={[
-                  { id: "cop", label: "Path map" },
-                  { id: "sigma", label: "Sigma graph", disabled: !traceSigmaGraph?.nodes?.length },
+                  { id: "sigma", label: "Sigma path map", disabled: !traceSigmaGraph?.nodes?.length },
+                  { id: "cop", label: "Timeline" },
                 ]}
               />
               {traceView === "cop" && (
